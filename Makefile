@@ -39,11 +39,11 @@ uninstall:
 	trash -- $(INSTALL_DIR)/$(BINARY) $(CONF_DIR)
 
 sync:
-	git add --all
-	@if git diff --cached --quiet; then \
-		echo "Nothing to commit"; \
+	@git add --all
+	@if ! git diff --cached --quiet; then \
+		git commit -m "sync"; \
 	else \
-		git commit; \
+		echo "Nothing to commit"; \
 	fi
-	git pull
-	git push
+	@git pull
+	@git push
