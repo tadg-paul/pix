@@ -13,7 +13,7 @@ lint:
 	go vet ./...
 
 test: lint
-	go test ./tests/regression/ -v -count=1
+	HOME=$$(mktemp -d) go test ./tests/regression/ -v -count=1
 
 test-one-off:
 ifdef ISSUE
