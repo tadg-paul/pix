@@ -87,16 +87,17 @@ func run() int {
 		return 1
 	}
 	binDir := filepath.Dir(exePath)
+	confDir := configDir(binDir)
 
-	// Load FAL_KEY from .env next to binary.
-	falKey, err := loadFALKey(filepath.Join(binDir, ".env"))
+	// Load FAL_KEY from .env.
+	falKey, err := loadFALKey(filepath.Join(confDir, ".env"))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		return 1
 	}
 
 	// Load config.
-	cfg, err := loadConfig(filepath.Join(binDir, "config.yaml"))
+	cfg, err := loadConfig(filepath.Join(confDir, "config.yaml"))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		return 1
@@ -127,6 +128,25 @@ func run() int {
 	reportCost(client, baseURL, cfg.Model, falKey)
 
 	return 0
+}
+
+// configDir returns the directory containing .env and config.yaml.
+// It checks the binary directory first (development), then falls back
+// to ~/.config/generate-image/ (installed via make install).
+func configDir(binDir string) string {
+	if _, err := os.Stat(filepath.Join(binDir, ".env")); err == nil {
+		return binDir
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return binDir
+	}
+	candidate := filepath.Join(home, ".config", "generate-image")
+	if _, err := os.Stat(filepath.Join(candidate, ".env")); err == nil {
+		return candidate
+	}
+	// Fall back to binDir so error messages reference the expected location.
+	return binDir
 }
 
 // loadFALKey reads FAL_KEY from a .env file.
