@@ -991,11 +991,15 @@ func TestCLI_preview_opens_image_RT1_28(t *testing.T) {
 	}
 }
 
-// RT-1.29: --preview without preview_command in config exits non-zero with clear error.
-// User action: runs with --preview flag but no preview_command configured.
-// User observes: error about missing preview_command.
-func TestCLI_preview_without_config_fails_RT1_29(t *testing.T) {
+// RT-1.29: --preview without preview_command uses platform default.
+// User action: runs with --preview flag but no preview_command in config.
+// User observes: image generated, platform default viewer invoked (which may
+// fail in test env, but the binary should attempt it rather than error about config).
+func TestCLI_preview_without_config_uses_default_RT1_29(t *testing.T) {
 	bin := buildBinary(t)
+
+	// Use a config with preview_command that writes a marker to prove default is overridden.
+	// Then test WITHOUT preview_command -- the binary should not error about missing config.
 	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
 
 	imageServer := newImageServer(t, fakeImagePNG, "image/png")
@@ -1004,11 +1008,30 @@ func TestCLI_preview_without_config_fails_RT1_29(t *testing.T) {
 	outFile := filepath.Join(t.TempDir(), "out.png")
 	_, stderr, exitCode := runBinary(t, binPath, []string{"--preview", outFile}, "a cat", []string{"FAL_BASE_URL=" + server.URL})
 
-	if exitCode == 0 {
-		t.Errorf("Expected non-zero exit code when preview_command not configured")
+	// The default preview command (open/xdg-open) may fail in a headless test env,
+	// but the error should be about the preview command failing, NOT about
+	// missing preview_command configuration.
+	if exitCode != 0 {
+		lower := strings.ToLower(stderr)
+		if strings.Contains(lower, "requires preview_command") {
+			t.Errorf("Should use platform default, not require config; got: %q", stderr)
+		}
 	}
-	lower := strings.ToLower(stderr)
-	if !strings.Contains(lower, "preview") {
-		t.Errorf("Expected error mentioning preview, got: %q", stderr)
+}
+
+// RT-1.30: --quiet and --dry-run together exits non-zero.
+// User action: runs with both --quiet and --dry-run.
+// User observes: error about conflicting flags.
+func TestCLI_quiet_and_dry_run_conflict_RT1_30(t *testing.T) {
+	bin := buildBinary(t)
+	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
+
+	_, stderr, exitCode := runBinary(t, binPath, []string{"--quiet", "--dry-run", "out.png"}, "a cat", nil)
+
+	if exitCode == 0 {
+		t.Errorf("Expected non-zero exit code for --quiet + --dry-run")
+	}
+	if stderr == "" {
+		t.Errorf("Expected error message about conflicting flags")
 	}
 }

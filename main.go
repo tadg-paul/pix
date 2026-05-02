@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -103,6 +104,11 @@ func run() int {
 		return 2
 	}
 
+	if quiet && dryRun {
+		fmt.Fprintln(os.Stderr, "Error: --quiet and --dry-run cannot be used together")
+		return 2
+	}
+
 	// Read prompt from stdin.
 	stdinBytes, err := io.ReadAll(os.Stdin)
 	if err != nil {
@@ -156,10 +162,10 @@ func run() int {
 		return 0
 	}
 
-	// Validate preview config before making the API call.
-	if preview && cfg.PreviewCommand == "" {
-		fmt.Fprintln(os.Stderr, "Error: --preview requires preview_command in config.yaml")
-		return 1
+	// Resolve preview command before making the API call.
+	previewCmd := cfg.PreviewCommand
+	if preview && previewCmd == "" {
+		previewCmd = defaultPreviewCommand()
 	}
 
 	// Determine API base URL (test hook via env var).
@@ -191,7 +197,7 @@ func run() int {
 
 	// Preview the image if requested.
 	if preview {
-		cmd := exec.Command("sh", "-c", cfg.PreviewCommand+" \"$1\"", "--", outputPath)
+		cmd := exec.Command("sh", "-c", previewCmd+" \"$1\"", "--", outputPath)
 		if err := cmd.Run(); err != nil {
 			fmt.Fprintf(os.Stderr, "Error running preview command: %v\n", err)
 			return 1
@@ -199,6 +205,18 @@ func run() int {
 	}
 
 	return 0
+}
+
+// defaultPreviewCommand returns the platform-appropriate image viewer command.
+func defaultPreviewCommand() string {
+	switch runtime.GOOS {
+	case "darwin":
+		return "open"
+	case "windows":
+		return "cmd /c start \"\""
+	default:
+		return "xdg-open"
+	}
 }
 
 // resolveFALKey resolves the FAL API key via priority chain:
