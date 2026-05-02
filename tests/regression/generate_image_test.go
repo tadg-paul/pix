@@ -684,3 +684,199 @@ func TestCLI_mismatched_extension_without_magick_fails_RT1_18(t *testing.T) {
 		t.Errorf("Output file should not exist after conversion failure")
 	}
 }
+
+// --- Key resolution chain tests ---
+
+// setupEnvWithConfig is like setupEnv but takes full config YAML and
+// optionally skips writing .env (to test key resolution from config).
+func setupEnvWithConfig(t *testing.T, binary string, dotEnvContent string, configYAML string) string {
+	t.Helper()
+	tmpDir := t.TempDir()
+
+	copyPath := filepath.Join(tmpDir, "generate-image")
+	srcData, err := os.ReadFile(binary)
+	if err != nil {
+		t.Fatalf("Failed to read binary: %v", err)
+	}
+	if err := os.WriteFile(copyPath, srcData, 0755); err != nil {
+		t.Fatalf("Failed to copy binary: %v", err)
+	}
+
+	// Write .env (may be empty to block fallback to ~/.config)
+	if err := os.WriteFile(filepath.Join(tmpDir, ".env"), []byte(dotEnvContent), 0600); err != nil {
+		t.Fatalf("Failed to write .env: %v", err)
+	}
+
+	if configYAML != "" {
+		if err := os.WriteFile(filepath.Join(tmpDir, "config.yaml"), []byte(configYAML), 0644); err != nil {
+			t.Fatalf("Failed to write config.yaml: %v", err)
+		}
+	}
+
+	return copyPath
+}
+
+// RT-1.19: FAL_KEY env var takes priority over all other sources.
+// User action: sets FAL_KEY in shell, config also has a command/file.
+// User observes: the env var key is used, not the config one.
+func TestCLI_env_var_takes_priority_RT1_19(t *testing.T) {
+	bin := buildBinary(t)
+
+	// Config points to a file with a different key
+	tmpDir := t.TempDir()
+	keyFile := filepath.Join(tmpDir, "fal.key")
+	os.WriteFile(keyFile, []byte("file-key\n"), 0600)
+
+	configYAML := fmt.Sprintf("model: fal-ai/grok-2-aurora\napi-keys:\n  fal:\n    file: %s\n", keyFile)
+	binPath := setupEnvWithConfig(t, bin, "", configYAML)
+
+	var capturedAuth string
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPI(t, func(w http.ResponseWriter, r *http.Request) {
+		capturedAuth = r.Header.Get("Authorization")
+		resp := map[string]interface{}{
+			"images": []map[string]interface{}{
+				{"url": imageServer.URL + "/image.png"},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}, nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	runBinary(t, binPath, []string{outFile}, "a cat", []string{
+		"FAL_BASE_URL=" + server.URL,
+		"FAL_KEY=env-var-key",
+	})
+
+	if capturedAuth != "Key env-var-key" {
+		t.Errorf("Expected env var key to take priority, got auth header: %q", capturedAuth)
+	}
+}
+
+// RT-1.20: api-keys.fal.command in config.yaml provides the key.
+// User action: config has a command that outputs the key.
+// User observes: the command's output is used as the key.
+func TestCLI_config_command_provides_key_RT1_20(t *testing.T) {
+	bin := buildBinary(t)
+
+	configYAML := "model: fal-ai/grok-2-aurora\napi-keys:\n  fal:\n    command: echo command-key\n"
+	binPath := setupEnvWithConfig(t, bin, "", configYAML)
+
+	var capturedAuth string
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPI(t, func(w http.ResponseWriter, r *http.Request) {
+		capturedAuth = r.Header.Get("Authorization")
+		resp := map[string]interface{}{
+			"images": []map[string]interface{}{
+				{"url": imageServer.URL + "/image.png"},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}, nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	runBinary(t, binPath, []string{outFile}, "a cat", []string{"FAL_BASE_URL=" + server.URL})
+
+	if capturedAuth != "Key command-key" {
+		t.Errorf("Expected command key, got auth header: %q", capturedAuth)
+	}
+}
+
+// RT-1.21: api-keys.fal.file in config.yaml provides the key.
+// User action: config points to a key file.
+// User observes: the key from that file is used.
+func TestCLI_config_file_provides_key_RT1_21(t *testing.T) {
+	bin := buildBinary(t)
+
+	tmpDir := t.TempDir()
+	keyFile := filepath.Join(tmpDir, "fal.key")
+	os.WriteFile(keyFile, []byte("file-provided-key\n"), 0600)
+
+	configYAML := fmt.Sprintf("model: fal-ai/grok-2-aurora\napi-keys:\n  fal:\n    file: %s\n", keyFile)
+	binPath := setupEnvWithConfig(t, bin, "", configYAML)
+
+	var capturedAuth string
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPI(t, func(w http.ResponseWriter, r *http.Request) {
+		capturedAuth = r.Header.Get("Authorization")
+		resp := map[string]interface{}{
+			"images": []map[string]interface{}{
+				{"url": imageServer.URL + "/image.png"},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}, nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	runBinary(t, binPath, []string{outFile}, "a cat", []string{"FAL_BASE_URL=" + server.URL})
+
+	if capturedAuth != "Key file-provided-key" {
+		t.Errorf("Expected file key, got auth header: %q", capturedAuth)
+	}
+}
+
+// RT-1.22: command takes priority over file when both specified.
+// User action: config has both command and file for fal key.
+// User observes: the command's output is used.
+func TestCLI_command_beats_file_RT1_22(t *testing.T) {
+	bin := buildBinary(t)
+
+	tmpDir := t.TempDir()
+	keyFile := filepath.Join(tmpDir, "fal.key")
+	os.WriteFile(keyFile, []byte("file-key\n"), 0600)
+
+	configYAML := fmt.Sprintf("model: fal-ai/grok-2-aurora\napi-keys:\n  fal:\n    command: echo command-wins\n    file: %s\n", keyFile)
+	binPath := setupEnvWithConfig(t, bin, "", configYAML)
+
+	var capturedAuth string
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPI(t, func(w http.ResponseWriter, r *http.Request) {
+		capturedAuth = r.Header.Get("Authorization")
+		resp := map[string]interface{}{
+			"images": []map[string]interface{}{
+				{"url": imageServer.URL + "/image.png"},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}, nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	runBinary(t, binPath, []string{outFile}, "a cat", []string{"FAL_BASE_URL=" + server.URL})
+
+	if capturedAuth != "Key command-wins" {
+		t.Errorf("Expected command key to win over file, got auth header: %q", capturedAuth)
+	}
+}
+
+// RT-1.23: .env fallback used when no config key sources defined.
+// User action: config has no api-keys section, .env has the key.
+// User observes: .env key is used (backward compatible).
+func TestCLI_dotenv_fallback_RT1_23(t *testing.T) {
+	bin := buildBinary(t)
+
+	binPath := setupEnvWithConfig(t, bin, "FAL_KEY=dotenv-fallback-key\n", "model: fal-ai/grok-2-aurora\n")
+
+	var capturedAuth string
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPI(t, func(w http.ResponseWriter, r *http.Request) {
+		capturedAuth = r.Header.Get("Authorization")
+		resp := map[string]interface{}{
+			"images": []map[string]interface{}{
+				{"url": imageServer.URL + "/image.png"},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}, nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	runBinary(t, binPath, []string{outFile}, "a cat", []string{"FAL_BASE_URL=" + server.URL})
+
+	if capturedAuth != "Key dotenv-fallback-key" {
+		t.Errorf("Expected .env fallback key, got auth header: %q", capturedAuth)
+	}
+}

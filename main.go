@@ -19,8 +19,14 @@ import (
 
 const version = "0.1.0"
 
+type apiKeyConfig struct {
+	Command string `yaml:"command"`
+	File    string `yaml:"file"`
+}
+
 type config struct {
-	Model string `yaml:"model"`
+	Model   string                  `yaml:"model"`
+	APIKeys map[string]apiKeyConfig `yaml:"api-keys"`
 }
 
 type falResponse struct {
@@ -90,15 +96,19 @@ func run() int {
 	binDir := filepath.Dir(exePath)
 	confDir := configDir(binDir)
 
-	// Load FAL_KEY from .env.
-	falKey, err := loadFALKey(filepath.Join(confDir, ".env"))
+	// Load config first (needed for api-keys resolution).
+	cfg, err := loadConfig(filepath.Join(confDir, "config.yaml"))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		return 1
 	}
 
-	// Load config.
-	cfg, err := loadConfig(filepath.Join(confDir, "config.yaml"))
+	// Resolve FAL API key via priority chain:
+	// 1. FAL_KEY env var
+	// 2. api-keys.fal.command in config
+	// 3. api-keys.fal.file in config
+	// 4. .env fallback in config dir
+	falKey, err := resolveFALKey(cfg, confDir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		return 1
@@ -148,6 +158,48 @@ func run() int {
 	reportCost(client, baseURL, cfg.Model, falKey)
 
 	return 0
+}
+
+// resolveFALKey resolves the FAL API key via priority chain:
+// 1. FAL_KEY environment variable
+// 2. api-keys.fal.command (run command, use stdout)
+// 3. api-keys.fal.file (read key from file)
+// 4. .env fallback in config directory
+func resolveFALKey(cfg *config, confDir string) (string, error) {
+	// 1. Environment variable
+	if key := os.Getenv("FAL_KEY"); key != "" {
+		return key, nil
+	}
+
+	// 2 & 3. Config-driven sources
+	if falCfg, ok := cfg.APIKeys["fal"]; ok {
+		// 2. Command (takes priority over file)
+		if falCfg.Command != "" {
+			out, err := exec.Command("sh", "-c", falCfg.Command).Output()
+			if err != nil {
+				return "", fmt.Errorf("api-keys.fal.command failed: %w", err)
+			}
+			key := strings.TrimSpace(string(out))
+			if key != "" {
+				return key, nil
+			}
+		}
+
+		// 3. File
+		if falCfg.File != "" {
+			data, err := os.ReadFile(falCfg.File)
+			if err != nil {
+				return "", fmt.Errorf("api-keys.fal.file: %w", err)
+			}
+			key := strings.TrimSpace(string(data))
+			if key != "" {
+				return key, nil
+			}
+		}
+	}
+
+	// 4. .env fallback
+	return loadFALKey(filepath.Join(confDir, ".env"))
 }
 
 // configDir returns the directory containing .env and config.yaml.
