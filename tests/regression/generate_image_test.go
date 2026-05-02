@@ -49,17 +49,22 @@ func projectRoot() string {
 	return filepath.Join(dir, "..", "..")
 }
 
-// setupEnv creates a temp directory with .env and config.yaml next to a symlink
+// setupEnv creates a temp directory with .env and config.yaml next to a copy
 // of the binary, so the binary resolves config from its own directory.
-// Returns the path to the symlink and a cleanup function.
+// A copy is used (not a symlink) because the binary resolves symlinks
+// via filepath.EvalSymlinks -- matching production where make install copies.
 func setupEnv(t *testing.T, binary string, falKey string, configYAML string) string {
 	t.Helper()
 	tmpDir := t.TempDir()
 
-	// Symlink binary into tmpDir so it resolves config from there
-	linkPath := filepath.Join(tmpDir, "generate-image")
-	if err := os.Symlink(binary, linkPath); err != nil {
-		t.Fatalf("Failed to symlink binary: %v", err)
+	// Copy binary into tmpDir so it resolves config from there
+	copyPath := filepath.Join(tmpDir, "generate-image")
+	srcData, err := os.ReadFile(binary)
+	if err != nil {
+		t.Fatalf("Failed to read binary: %v", err)
+	}
+	if err := os.WriteFile(copyPath, srcData, 0755); err != nil {
+		t.Fatalf("Failed to copy binary: %v", err)
 	}
 
 	if falKey != "" {
@@ -75,7 +80,7 @@ func setupEnv(t *testing.T, binary string, falKey string, configYAML string) str
 		}
 	}
 
-	return linkPath
+	return copyPath
 }
 
 // runBinary executes the binary with the given args, stdin, and env vars.
@@ -264,7 +269,7 @@ func TestCLI_env_loaded_from_binary_dir_not_cwd_RT1_6(t *testing.T) {
 
 	// Set up the real env next to binary with a known key
 	realKey := "real-key-from-binary-dir"
-	linkPath := setupEnv(t, bin, realKey, "model: fal-ai/grok-2-aurora\n")
+	binPath := setupEnv(t, bin, realKey, "model: fal-ai/grok-2-aurora\n")
 
 	// Create a decoy .env in a different cwd with a wrong key
 	cwd := t.TempDir()
@@ -291,7 +296,7 @@ func TestCLI_env_loaded_from_binary_dir_not_cwd_RT1_6(t *testing.T) {
 
 	outFile := filepath.Join(t.TempDir(), "out.png")
 
-	cmd := exec.Command(linkPath, outFile)
+	cmd := exec.Command(binPath, outFile)
 	cmd.Stdin = strings.NewReader("a red cat")
 	cmd.Dir = cwd
 	cmd.Env = append(os.Environ(), "FAL_BASE_URL="+server.URL)
