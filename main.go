@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -112,16 +113,35 @@ func run() int {
 	// Call FAL API.
 	client := &http.Client{Timeout: 120 * time.Second}
 
-	imageData, err := generateImage(client, baseURL, cfg.Model, prompt, falKey)
+	imageData, contentType, err := generateImage(client, baseURL, cfg.Model, prompt, falKey)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		return 1
 	}
 
-	// Write image to output path.
-	if err := os.WriteFile(outputPath, imageData, 0644); err != nil {
-		fmt.Fprintf(os.Stderr, "Error writing output file: %v\n", err)
-		return 1
+	// Determine the actual file extension from the API response.
+	apiExt := extFromContentType(contentType)
+	userExt := filepath.Ext(outputPath)
+
+	if userExt == "" {
+		// No extension given -- append the API format extension.
+		outputPath = outputPath + apiExt
+		if err := os.WriteFile(outputPath, imageData, 0644); err != nil {
+			fmt.Fprintf(os.Stderr, "Error writing output file: %v\n", err)
+			return 1
+		}
+	} else if strings.EqualFold(userExt, apiExt) {
+		// Matching extension -- write as-is.
+		if err := os.WriteFile(outputPath, imageData, 0644); err != nil {
+			fmt.Fprintf(os.Stderr, "Error writing output file: %v\n", err)
+			return 1
+		}
+	} else {
+		// Mismatched extension -- try to convert with magick.
+		if err := convertWithMagick(imageData, apiExt, outputPath); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			return 1
+		}
 	}
 
 	// Fetch and report pricing.
@@ -173,6 +193,64 @@ func loadFALKey(path string) (string, error) {
 	return "", fmt.Errorf("FAL_KEY not found in %s", path)
 }
 
+// extFromContentType maps a Content-Type to a file extension (with dot).
+func extFromContentType(ct string) string {
+	ct = strings.ToLower(strings.TrimSpace(ct))
+	// Strip parameters (e.g. "image/jpeg; charset=...")
+	if i := strings.Index(ct, ";"); i >= 0 {
+		ct = ct[:i]
+	}
+	switch ct {
+	case "image/jpeg":
+		return ".jpg"
+	case "image/png":
+		return ".png"
+	case "image/webp":
+		return ".webp"
+	case "image/gif":
+		return ".gif"
+	default:
+		return ".jpg"
+	}
+}
+
+// convertWithMagick converts image data to the format implied by outputPath
+// using ImageMagick's magick command. Returns an error if magick is not
+// available or conversion fails.
+func convertWithMagick(imageData []byte, srcExt string, outputPath string) error {
+	magickPath, err := exec.LookPath("magick")
+	if err != nil {
+		apiFormat := strings.TrimPrefix(srcExt, ".")
+		userFormat := strings.TrimPrefix(filepath.Ext(outputPath), ".")
+		return fmt.Errorf(
+			"API returned %s but you requested %s; install ImageMagick (magick) to convert automatically",
+			apiFormat, userFormat,
+		)
+	}
+
+	// Write source image to temp file.
+	tmpFile, err := os.CreateTemp("", "generate-image-*"+srcExt)
+	if err != nil {
+		return fmt.Errorf("failed to create temp file: %w", err)
+	}
+	tmpPath := tmpFile.Name()
+	defer os.Remove(tmpPath)
+
+	if _, err := tmpFile.Write(imageData); err != nil {
+		tmpFile.Close()
+		return fmt.Errorf("failed to write temp file: %w", err)
+	}
+	tmpFile.Close()
+
+	// Convert with magick.
+	cmd := exec.Command(magickPath, tmpPath, outputPath)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("magick conversion failed: %s (%w)", strings.TrimSpace(string(out)), err)
+	}
+
+	return nil
+}
+
 // loadConfig reads config.yaml.
 func loadConfig(path string) (*config, error) {
 	data, err := os.ReadFile(path)
@@ -192,58 +270,59 @@ func loadConfig(path string) (*config, error) {
 	return &cfg, nil
 }
 
-// generateImage calls the FAL API and returns the image bytes.
-func generateImage(client *http.Client, baseURL, model, prompt, falKey string) ([]byte, error) {
+// generateImage calls the FAL API and returns the image bytes and content type.
+func generateImage(client *http.Client, baseURL, model, prompt, falKey string) ([]byte, string, error) {
 	reqBody, err := json.Marshal(map[string]string{"prompt": prompt})
 	if err != nil {
-		return nil, fmt.Errorf("failed to build request: %w", err)
+		return nil, "", fmt.Errorf("failed to build request: %w", err)
 	}
 
 	url := fmt.Sprintf("%s/%s", baseURL, model)
 	req, err := http.NewRequest("POST", url, strings.NewReader(string(reqBody)))
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+		return nil, "", fmt.Errorf("failed to create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Key "+falKey)
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("FAL API request failed: %w", err)
+		return nil, "", fmt.Errorf("FAL API request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read FAL API response: %w", err)
+		return nil, "", fmt.Errorf("failed to read FAL API response: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("FAL API error (HTTP %d): %s", resp.StatusCode, string(body))
+		return nil, "", fmt.Errorf("FAL API error (HTTP %d): %s", resp.StatusCode, string(body))
 	}
 
 	var falResp falResponse
 	if err := json.Unmarshal(body, &falResp); err != nil {
-		return nil, fmt.Errorf("failed to parse FAL API response: %w", err)
+		return nil, "", fmt.Errorf("failed to parse FAL API response: %w", err)
 	}
 
 	if len(falResp.Images) == 0 {
-		return nil, fmt.Errorf("FAL API returned no images")
+		return nil, "", fmt.Errorf("FAL API returned no images")
 	}
 
 	// Download the image.
 	imgResp, err := client.Get(falResp.Images[0].URL)
 	if err != nil {
-		return nil, fmt.Errorf("failed to download image: %w", err)
+		return nil, "", fmt.Errorf("failed to download image: %w", err)
 	}
 	defer imgResp.Body.Close()
 
 	imageData, err := io.ReadAll(imgResp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read image data: %w", err)
+		return nil, "", fmt.Errorf("failed to read image data: %w", err)
 	}
 
-	return imageData, nil
+	contentType := imgResp.Header.Get("Content-Type")
+	return imageData, contentType, nil
 }
 
 // reportCost fetches pricing from the FAL API and prints cost to stderr.
