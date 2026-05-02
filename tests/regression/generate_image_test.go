@@ -880,3 +880,160 @@ func TestCLI_dotenv_fallback_RT1_23(t *testing.T) {
 		t.Errorf("Expected .env fallback key, got auth header: %q", capturedAuth)
 	}
 }
+
+// --- --quiet, --dry-run, --preview tests ---
+
+// RT-1.24: --quiet suppresses cost output on stderr.
+// User action: runs with --quiet flag and a model that has pricing.
+// User observes: no cost line on terminal.
+func TestCLI_quiet_suppresses_cost_RT1_24(t *testing.T) {
+	bin := buildBinary(t)
+	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
+
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+
+	pricingHandler := func(w http.ResponseWriter, r *http.Request) {
+		resp := map[string]interface{}{
+			"prices": []map[string]interface{}{
+				{"unit_price": 0.07, "unit": "image", "currency": "USD"},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}
+	server := startFakeAPI(t, successHandler(t, imageServer, nil), pricingHandler)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	_, stderr, exitCode := runBinary(t, binPath, []string{"--quiet", outFile}, "a cat", []string{"FAL_BASE_URL=" + server.URL})
+
+	if exitCode != 0 {
+		t.Errorf("Expected exit code 0, got %d", exitCode)
+	}
+	if strings.Contains(strings.ToLower(stderr), "cost") {
+		t.Errorf("Expected no cost output with --quiet, got: %q", stderr)
+	}
+}
+
+// RT-1.25: cost printed by default (without --quiet).
+// User action: runs without --quiet flag and a model that has pricing.
+// User observes: cost line on terminal.
+func TestCLI_cost_printed_by_default_RT1_25(t *testing.T) {
+	bin := buildBinary(t)
+	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
+
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+
+	pricingHandler := func(w http.ResponseWriter, r *http.Request) {
+		resp := map[string]interface{}{
+			"prices": []map[string]interface{}{
+				{"unit_price": 0.07, "unit": "image", "currency": "USD"},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}
+	server := startFakeAPI(t, successHandler(t, imageServer, nil), pricingHandler)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	_, stderr, _ := runBinary(t, binPath, []string{outFile}, "a cat", []string{"FAL_BASE_URL=" + server.URL})
+
+	if !strings.Contains(strings.ToLower(stderr), "cost") {
+		t.Errorf("Expected cost output by default, got: %q", stderr)
+	}
+}
+
+// RT-1.26: --dry-run prints config summary and exits zero without calling API.
+// User action: runs with --dry-run flag.
+// User observes: summary of what would happen (model, prompt, output), no API call.
+func TestCLI_dry_run_prints_summary_RT1_26(t *testing.T) {
+	bin := buildBinary(t)
+	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
+
+	apiCalled := false
+	server := startFakeAPI(t, func(w http.ResponseWriter, r *http.Request) {
+		apiCalled = true
+		http.Error(w, "should not be called", 500)
+	}, nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	_, stderr, exitCode := runBinary(t, binPath, []string{"--dry-run", outFile}, "a red cat", []string{"FAL_BASE_URL=" + server.URL})
+
+	if exitCode != 0 {
+		t.Errorf("Expected exit code 0 for --dry-run, got %d", exitCode)
+	}
+	if apiCalled {
+		t.Errorf("API should not be called during --dry-run")
+	}
+	lower := strings.ToLower(stderr)
+	if !strings.Contains(lower, "model") {
+		t.Errorf("Expected --dry-run to mention model, got: %q", stderr)
+	}
+	if !strings.Contains(lower, "a red cat") {
+		t.Errorf("Expected --dry-run to show prompt, got: %q", stderr)
+	}
+}
+
+// RT-1.27: --dry-run does not create an output file.
+// User action: runs with --dry-run flag.
+// User observes: no output file created.
+func TestCLI_dry_run_no_output_file_RT1_27(t *testing.T) {
+	bin := buildBinary(t)
+	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
+
+	server := startFakeAPI(t, nil, nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	runBinary(t, binPath, []string{"--dry-run", outFile}, "a cat", []string{"FAL_BASE_URL=" + server.URL})
+
+	if _, err := os.Stat(outFile); err == nil {
+		t.Errorf("Output file should not exist after --dry-run")
+	}
+}
+
+// RT-1.28: --preview opens the image with the configured preview_command.
+// User action: runs with --preview flag and preview_command set in config.
+// User observes: image generated, then opened with the configured command.
+func TestCLI_preview_opens_image_RT1_28(t *testing.T) {
+	bin := buildBinary(t)
+
+	// Use a preview command that writes a marker file to prove it ran.
+	markerFile := filepath.Join(t.TempDir(), "preview-ran")
+	previewCmd := fmt.Sprintf("touch %s", markerFile)
+	configYAML := fmt.Sprintf("model: fal-ai/grok-2-aurora\npreview_command: \"%s\"\n", previewCmd)
+	binPath := setupEnv(t, bin, "test-key", configYAML)
+
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPI(t, successHandler(t, imageServer, nil), nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	_, _, exitCode := runBinary(t, binPath, []string{"--preview", outFile}, "a cat", []string{"FAL_BASE_URL=" + server.URL})
+
+	if exitCode != 0 {
+		t.Errorf("Expected exit code 0, got %d", exitCode)
+	}
+	if _, err := os.Stat(markerFile); err != nil {
+		t.Errorf("Preview command did not run (marker file missing)")
+	}
+}
+
+// RT-1.29: --preview without preview_command in config exits non-zero with clear error.
+// User action: runs with --preview flag but no preview_command configured.
+// User observes: error about missing preview_command.
+func TestCLI_preview_without_config_fails_RT1_29(t *testing.T) {
+	bin := buildBinary(t)
+	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
+
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPI(t, successHandler(t, imageServer, nil), nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	_, stderr, exitCode := runBinary(t, binPath, []string{"--preview", outFile}, "a cat", []string{"FAL_BASE_URL=" + server.URL})
+
+	if exitCode == 0 {
+		t.Errorf("Expected non-zero exit code when preview_command not configured")
+	}
+	lower := strings.ToLower(stderr)
+	if !strings.Contains(lower, "preview") {
+		t.Errorf("Expected error mentioning preview, got: %q", stderr)
+	}
+}

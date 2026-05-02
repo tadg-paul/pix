@@ -25,8 +25,9 @@ type apiKeyConfig struct {
 }
 
 type config struct {
-	Model   string                  `yaml:"model"`
-	APIKeys map[string]apiKeyConfig `yaml:"api-keys"`
+	Model          string                  `yaml:"model"`
+	APIKeys        map[string]apiKeyConfig `yaml:"api-keys"`
+	PreviewCommand string                  `yaml:"preview_command"`
 }
 
 type falResponse struct {
@@ -47,28 +48,60 @@ func main() {
 	os.Exit(run())
 }
 
+func printUsage() {
+	fmt.Fprintln(os.Stderr, "Usage: generate-image [flags] <output-file>")
+	fmt.Fprintln(os.Stderr, "")
+	fmt.Fprintln(os.Stderr, "Reads a text prompt from stdin and generates an image via the FAL API.")
+	fmt.Fprintln(os.Stderr, "")
+	fmt.Fprintln(os.Stderr, "Flags:")
+	fmt.Fprintln(os.Stderr, "  -h, --help       Show this help message")
+	fmt.Fprintln(os.Stderr, "  --version        Show version")
+	fmt.Fprintln(os.Stderr, "  -q, --quiet      Suppress cost output")
+	fmt.Fprintln(os.Stderr, "  --dry-run        Show what would happen without calling the API")
+	fmt.Fprintln(os.Stderr, "  -p, --preview    Open the image after generation (requires preview_command in config)")
+}
+
 func run() int {
-	// Check flags first -- before any other validation.
-	if len(os.Args) > 1 {
-		switch os.Args[1] {
+	// Parse flags and positional arguments.
+	quiet := false
+	dryRun := false
+	preview := false
+	var outputPath string
+
+	for _, arg := range os.Args[1:] {
+		switch arg {
 		case "-h", "--help":
-			fmt.Fprintln(os.Stderr, "Usage: generate-image <output-file>")
-			fmt.Fprintln(os.Stderr, "")
-			fmt.Fprintln(os.Stderr, "Reads a text prompt from stdin and generates an image via the FAL API.")
-			fmt.Fprintln(os.Stderr, "The output file path is required as the first argument.")
+			printUsage()
 			return 0
 		case "--version":
 			fmt.Fprintln(os.Stderr, "generate-image "+version)
 			return 0
+		case "-q", "--quiet":
+			quiet = true
+		case "--dry-run":
+			dryRun = true
+		case "-p", "--preview":
+			preview = true
+		default:
+			if strings.HasPrefix(arg, "-") {
+				fmt.Fprintf(os.Stderr, "Unknown flag: %s\n", arg)
+				printUsage()
+				return 2
+			}
+			if outputPath == "" {
+				outputPath = arg
+			} else {
+				fmt.Fprintln(os.Stderr, "Error: too many arguments")
+				printUsage()
+				return 2
+			}
 		}
 	}
 
-	// Validate arguments.
-	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "Usage: generate-image <output-file>")
+	if outputPath == "" {
+		printUsage()
 		return 2
 	}
-	outputPath := os.Args[1]
 
 	// Read prompt from stdin.
 	stdinBytes, err := io.ReadAll(os.Stdin)
@@ -114,6 +147,21 @@ func run() int {
 		return 1
 	}
 
+	// Dry-run: print what would happen and exit.
+	if dryRun {
+		fmt.Fprintf(os.Stderr, "Model: %s\n", cfg.Model)
+		fmt.Fprintf(os.Stderr, "Prompt: %s\n", prompt)
+		fmt.Fprintf(os.Stderr, "Output: %s\n", outputPath)
+		fmt.Fprintln(os.Stderr, "(dry run -- no API call made)")
+		return 0
+	}
+
+	// Validate preview config before making the API call.
+	if preview && cfg.PreviewCommand == "" {
+		fmt.Fprintln(os.Stderr, "Error: --preview requires preview_command in config.yaml")
+		return 1
+	}
+
 	// Determine API base URL (test hook via env var).
 	baseURL := os.Getenv("FAL_BASE_URL")
 	if baseURL == "" {
@@ -154,8 +202,19 @@ func run() int {
 		}
 	}
 
-	// Fetch and report pricing.
-	reportCost(client, baseURL, cfg.Model, falKey)
+	// Fetch and report pricing (unless --quiet).
+	if !quiet {
+		reportCost(client, baseURL, cfg.Model, falKey)
+	}
+
+	// Preview the image if requested.
+	if preview {
+		cmd := exec.Command("sh", "-c", cfg.PreviewCommand+" "+outputPath)
+		if err := cmd.Run(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error running preview command: %v\n", err)
+			return 1
+		}
+	}
 
 	return 0
 }
