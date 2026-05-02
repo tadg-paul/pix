@@ -177,29 +177,11 @@ func run() int {
 		return 1
 	}
 
-	// Determine the actual file extension from the API response.
-	apiExt := extFromContentType(contentType)
-	userExt := filepath.Ext(outputPath)
-
-	if userExt == "" {
-		// No extension given -- append the API format extension.
-		outputPath = outputPath + apiExt
-		if err := os.WriteFile(outputPath, imageData, 0644); err != nil {
-			fmt.Fprintf(os.Stderr, "Error writing output file: %v\n", err)
-			return 1
-		}
-	} else if strings.EqualFold(userExt, apiExt) {
-		// Matching extension -- write as-is.
-		if err := os.WriteFile(outputPath, imageData, 0644); err != nil {
-			fmt.Fprintf(os.Stderr, "Error writing output file: %v\n", err)
-			return 1
-		}
-	} else {
-		// Mismatched extension -- try to convert with magick.
-		if err := convertWithMagick(imageData, apiExt, outputPath); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			return 1
-		}
+	// Write image to disk, handling extension and format conversion.
+	outputPath, err = writeImage(imageData, contentType, outputPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		return 1
 	}
 
 	// Fetch and report pricing (unless --quiet).
@@ -209,7 +191,7 @@ func run() int {
 
 	// Preview the image if requested.
 	if preview {
-		cmd := exec.Command("sh", "-c", cfg.PreviewCommand+" "+outputPath)
+		cmd := exec.Command("sh", "-c", cfg.PreviewCommand+" \"$1\"", "--", outputPath)
 		if err := cmd.Run(); err != nil {
 			fmt.Fprintf(os.Stderr, "Error running preview command: %v\n", err)
 			return 1
@@ -234,6 +216,7 @@ func resolveFALKey(cfg *config, confDir string) (string, error) {
 	if falCfg, ok := cfg.APIKeys["fal"]; ok {
 		// 2. Command (takes priority over file)
 		if falCfg.Command != "" {
+			// Trust boundary: command is from user-owned config.yaml, not external input.
 			out, err := exec.Command("sh", "-c", falCfg.Command).Output()
 			if err != nil {
 				return "", fmt.Errorf("api-keys.fal.command failed: %w", err)
@@ -265,7 +248,7 @@ func resolveFALKey(cfg *config, confDir string) (string, error) {
 // It checks the binary directory first (development), then falls back
 // to ~/.config/generate-image/ (installed via make install).
 func configDir(binDir string) string {
-	if _, err := os.Stat(filepath.Join(binDir, ".env")); err == nil {
+	if hasConfigFiles(binDir) {
 		return binDir
 	}
 	home, err := os.UserHomeDir()
@@ -273,11 +256,22 @@ func configDir(binDir string) string {
 		return binDir
 	}
 	candidate := filepath.Join(home, ".config", "generate-image")
-	if _, err := os.Stat(filepath.Join(candidate, ".env")); err == nil {
+	if hasConfigFiles(candidate) {
 		return candidate
 	}
 	// Fall back to binDir so error messages reference the expected location.
 	return binDir
+}
+
+// hasConfigFiles returns true if the directory contains config.yaml or .env.
+func hasConfigFiles(dir string) bool {
+	if _, err := os.Stat(filepath.Join(dir, "config.yaml")); err == nil {
+		return true
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".env")); err == nil {
+		return true
+	}
+	return false
 }
 
 // loadFALKey reads FAL_KEY from a .env file.
@@ -302,6 +296,33 @@ func loadFALKey(path string) (string, error) {
 	}
 
 	return "", fmt.Errorf("FAL_KEY not found in %s", path)
+}
+
+// writeImage writes image data to disk, handling extension logic:
+// - No extension: appends the API format extension
+// - Matching extension: writes as-is
+// - Mismatched extension: converts via ImageMagick or returns an error
+// Returns the final output path (which may differ from the input).
+func writeImage(imageData []byte, contentType string, outputPath string) (string, error) {
+	apiExt := extFromContentType(contentType)
+	userExt := filepath.Ext(outputPath)
+
+	if userExt == "" {
+		outputPath = outputPath + apiExt
+	}
+
+	if userExt == "" || strings.EqualFold(userExt, apiExt) {
+		if err := os.WriteFile(outputPath, imageData, 0644); err != nil {
+			return "", fmt.Errorf("writing output file: %w", err)
+		}
+		return outputPath, nil
+	}
+
+	// Mismatched extension -- try to convert with magick.
+	if err := convertWithMagick(imageData, apiExt, outputPath); err != nil {
+		return "", err
+	}
+	return outputPath, nil
 }
 
 // extFromContentType maps a Content-Type to a file extension (with dot).
@@ -437,6 +458,7 @@ func generateImage(client *http.Client, baseURL, model, prompt, falKey string) (
 }
 
 // reportCost fetches pricing from the FAL API and prints cost to stderr.
+// Pricing is best-effort; failures are non-fatal and silently ignored.
 func reportCost(client *http.Client, baseURL, model, falKey string) {
 	// Determine pricing URL -- use FAL_BASE_URL if set (for tests),
 	// otherwise use the real pricing endpoint.

@@ -51,39 +51,14 @@ func projectRoot() string {
 
 // setupEnv creates a temp directory with .env and config.yaml next to a copy
 // of the binary, so the binary resolves config from its own directory.
-// A copy is used (not a symlink) because the binary resolves symlinks
-// via filepath.EvalSymlinks -- matching production where make install copies.
+// Thin wrapper around setupEnvWithConfig for the common case.
 func setupEnv(t *testing.T, binary string, falKey string, configYAML string) string {
 	t.Helper()
-	tmpDir := t.TempDir()
-
-	// Copy binary into tmpDir so it resolves config from there
-	copyPath := filepath.Join(tmpDir, "generate-image")
-	srcData, err := os.ReadFile(binary)
-	if err != nil {
-		t.Fatalf("Failed to read binary: %v", err)
-	}
-	if err := os.WriteFile(copyPath, srcData, 0755); err != nil {
-		t.Fatalf("Failed to copy binary: %v", err)
-	}
-
-	// Always write .env so the binary finds it here and doesn't fall back
-	// to ~/.config/generate-image/ (which may contain a real key).
-	envContent := ""
+	dotEnv := ""
 	if falKey != "" {
-		envContent = fmt.Sprintf("FAL_KEY=%s\n", falKey)
+		dotEnv = fmt.Sprintf("FAL_KEY=%s\n", falKey)
 	}
-	if err := os.WriteFile(filepath.Join(tmpDir, ".env"), []byte(envContent), 0600); err != nil {
-		t.Fatalf("Failed to write .env: %v", err)
-	}
-
-	if configYAML != "" {
-		if err := os.WriteFile(filepath.Join(tmpDir, "config.yaml"), []byte(configYAML), 0644); err != nil {
-			t.Fatalf("Failed to write config.yaml: %v", err)
-		}
-	}
-
-	return copyPath
+	return setupEnvWithConfig(t, binary, dotEnv, configYAML)
 }
 
 // runBinary executes the binary with the given args, stdin, and env vars.
