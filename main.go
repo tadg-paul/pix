@@ -106,7 +106,7 @@ func run() int {
 	// Determine API base URL (test hook via env var).
 	baseURL := os.Getenv("FAL_BASE_URL")
 	if baseURL == "" {
-		baseURL = "https://queue.fal.run"
+		baseURL = "https://fal.run"
 	}
 
 	// Call FAL API.
@@ -251,7 +251,7 @@ func reportCost(client *http.Client, baseURL, model, falKey string) {
 	// Determine pricing URL -- use FAL_BASE_URL if set (for tests),
 	// otherwise use the real pricing endpoint.
 	pricingBase := baseURL
-	if pricingBase == "https://queue.fal.run" {
+	if pricingBase == "https://fal.run" {
 		pricingBase = "https://api.fal.ai"
 	}
 

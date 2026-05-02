@@ -67,11 +67,14 @@ func setupEnv(t *testing.T, binary string, falKey string, configYAML string) str
 		t.Fatalf("Failed to copy binary: %v", err)
 	}
 
+	// Always write .env so the binary finds it here and doesn't fall back
+	// to ~/.config/generate-image/ (which may contain a real key).
+	envContent := ""
 	if falKey != "" {
-		envContent := fmt.Sprintf("FAL_KEY=%s\n", falKey)
-		if err := os.WriteFile(filepath.Join(tmpDir, ".env"), []byte(envContent), 0600); err != nil {
-			t.Fatalf("Failed to write .env: %v", err)
-		}
+		envContent = fmt.Sprintf("FAL_KEY=%s\n", falKey)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, ".env"), []byte(envContent), 0600); err != nil {
+		t.Fatalf("Failed to write .env: %v", err)
 	}
 
 	if configYAML != "" {
