@@ -1036,3 +1036,218 @@ func TestCLI_quiet_and_dry_run_conflict_RT1_30(t *testing.T) {
 		t.Errorf("Expected error message about conflicting flags")
 	}
 }
+
+// --- --cost tests ---
+
+// startFakeAPIWithEstimate extends startFakeAPI with a separate handler for
+// the /v1/models/pricing/estimate endpoint.
+func startFakeAPIWithEstimate(t *testing.T, generateHandler http.HandlerFunc, pricingHandler http.HandlerFunc, estimateHandler http.HandlerFunc) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/models/pricing/estimate" {
+			if estimateHandler != nil {
+				estimateHandler(w, r)
+			} else {
+				http.NotFound(w, r)
+			}
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/v1/models/pricing") {
+			if pricingHandler != nil {
+				pricingHandler(w, r)
+			} else {
+				http.NotFound(w, r)
+			}
+			return
+		}
+		if generateHandler != nil {
+			generateHandler(w, r)
+		} else {
+			http.NotFound(w, r)
+		}
+	})
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	return server
+}
+
+// fakePricingHandler returns a handler that serves a unit price response.
+func fakePricingHandler(unitPrice float64, unit string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		resp := map[string]interface{}{
+			"prices": []map[string]interface{}{
+				{"endpoint_id": r.URL.Query().Get("endpoint_id"), "unit_price": unitPrice, "unit": unit, "currency": "USD"},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}
+}
+
+// fakeEstimateHandler returns a handler that serves a cost estimate response.
+func fakeEstimateHandler(totalCost float64) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		resp := map[string]interface{}{
+			"estimate_type": "historical_api_price",
+			"total_cost":    totalCost,
+			"currency":      "USD",
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}
+}
+
+// RT-2.1: --cost prints unit price to stderr.
+// User action: runs "generate-image --cost".
+// User observes: unit price for the configured model on terminal.
+func TestCLI_cost_flag_prints_unit_price_RT2_1(t *testing.T) {
+	bin := buildBinary(t)
+	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
+
+	server := startFakeAPIWithEstimate(t, nil, fakePricingHandler(0.02, "images"), fakeEstimateHandler(0.02))
+
+	_, stderr, exitCode := runBinary(t, binPath, []string{"--cost"}, "", []string{"FAL_BASE_URL=" + server.URL})
+
+	if exitCode != 0 {
+		t.Errorf("Expected exit code 0, got %d; stderr: %s", exitCode, stderr)
+	}
+	if !strings.Contains(stderr, "0.02") {
+		t.Errorf("Expected unit price in output, got: %q", stderr)
+	}
+	if !strings.Contains(stderr, "images") {
+		t.Errorf("Expected unit type in output, got: %q", stderr)
+	}
+}
+
+// RT-2.2: --cost exits zero without calling generation endpoint.
+// User action: runs "generate-image --cost".
+// User observes: pricing info, no image generated.
+func TestCLI_cost_flag_no_generation_RT2_2(t *testing.T) {
+	bin := buildBinary(t)
+	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
+
+	generationCalled := false
+	server := startFakeAPIWithEstimate(t, func(w http.ResponseWriter, r *http.Request) {
+		generationCalled = true
+		http.Error(w, "should not be called", 500)
+	}, fakePricingHandler(0.02, "images"), fakeEstimateHandler(0.02))
+
+	_, _, exitCode := runBinary(t, binPath, []string{"--cost"}, "", []string{"FAL_BASE_URL=" + server.URL})
+
+	if exitCode != 0 {
+		t.Errorf("Expected exit code 0, got %d", exitCode)
+	}
+	if generationCalled {
+		t.Errorf("Generation endpoint should not be called with --cost")
+	}
+}
+
+// RT-2.3: --cost does not require stdin input.
+// User action: runs "generate-image --cost" with no piped input.
+// User observes: pricing info without needing a prompt.
+func TestCLI_cost_flag_no_stdin_required_RT2_3(t *testing.T) {
+	bin := buildBinary(t)
+	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
+
+	server := startFakeAPIWithEstimate(t, nil, fakePricingHandler(0.02, "images"), fakeEstimateHandler(0.02))
+
+	// Pass empty stdin explicitly
+	_, stderr, exitCode := runBinary(t, binPath, []string{"--cost"}, "", []string{"FAL_BASE_URL=" + server.URL})
+
+	if exitCode != 0 {
+		t.Errorf("Expected exit code 0 without stdin, got %d; stderr: %s", exitCode, stderr)
+	}
+}
+
+// RT-2.4: --cost does not create an output file.
+// User action: runs "generate-image --cost".
+// User observes: no file created.
+func TestCLI_cost_flag_no_output_file_RT2_4(t *testing.T) {
+	bin := buildBinary(t)
+	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
+
+	server := startFakeAPIWithEstimate(t, nil, fakePricingHandler(0.02, "images"), fakeEstimateHandler(0.02))
+
+	outDir := t.TempDir()
+	_, _, _ = runBinary(t, binPath, []string{"--cost"}, "", []string{"FAL_BASE_URL=" + server.URL})
+
+	entries, _ := os.ReadDir(outDir)
+	if len(entries) > 0 {
+		t.Errorf("Expected no files created, found: %v", entries)
+	}
+}
+
+// RT-2.5: Historical estimate printed when available.
+// User action: runs "generate-image --cost" with a model that has usage history.
+// User observes: both unit price and historical estimate on terminal.
+func TestCLI_cost_flag_historical_estimate_RT2_5(t *testing.T) {
+	bin := buildBinary(t)
+	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
+
+	server := startFakeAPIWithEstimate(t, nil, fakePricingHandler(0.02, "images"), fakeEstimateHandler(0.025))
+
+	_, stderr, _ := runBinary(t, binPath, []string{"--cost"}, "", []string{"FAL_BASE_URL=" + server.URL})
+
+	if !strings.Contains(stderr, "0.025") {
+		t.Errorf("Expected historical estimate in output, got: %q", stderr)
+	}
+}
+
+// RT-2.6: "not available" message when no usage history exists.
+// User action: runs "generate-image --cost" with a model that has no usage history.
+// User observes: unit price shown, historical estimate says "not available".
+func TestCLI_cost_flag_no_history_RT2_6(t *testing.T) {
+	bin := buildBinary(t)
+	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
+
+	// Estimate endpoint returns 404 (no history)
+	server := startFakeAPIWithEstimate(t, nil, fakePricingHandler(0.02, "images"), func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r)
+	})
+
+	_, stderr, _ := runBinary(t, binPath, []string{"--cost"}, "", []string{"FAL_BASE_URL=" + server.URL})
+
+	lower := strings.ToLower(stderr)
+	if !strings.Contains(lower, "not available") {
+		t.Errorf("Expected 'not available' for missing history, got: %q", stderr)
+	}
+}
+
+// RT-2.7: --quiet suppresses --cost output.
+// User action: runs "generate-image --quiet --cost".
+// User observes: nothing on terminal.
+func TestCLI_cost_flag_quiet_suppresses_RT2_7(t *testing.T) {
+	bin := buildBinary(t)
+	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
+
+	server := startFakeAPIWithEstimate(t, nil, fakePricingHandler(0.02, "images"), fakeEstimateHandler(0.02))
+
+	_, stderr, exitCode := runBinary(t, binPath, []string{"--quiet", "--cost"}, "", []string{"FAL_BASE_URL=" + server.URL})
+
+	if exitCode != 0 {
+		t.Errorf("Expected exit code 0, got %d", exitCode)
+	}
+	if stderr != "" {
+		t.Errorf("Expected no output with --quiet --cost, got: %q", stderr)
+	}
+}
+
+// RT-2.8: --cost with --dry-run is not an error.
+// User action: runs "generate-image --cost --dry-run".
+// User observes: cost info shown (dry-run doesn't conflict with cost).
+func TestCLI_cost_flag_with_dry_run_RT2_8(t *testing.T) {
+	bin := buildBinary(t)
+	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
+
+	server := startFakeAPIWithEstimate(t, nil, fakePricingHandler(0.02, "images"), fakeEstimateHandler(0.02))
+
+	_, stderr, exitCode := runBinary(t, binPath, []string{"--cost", "--dry-run"}, "", []string{"FAL_BASE_URL=" + server.URL})
+
+	if exitCode != 0 {
+		t.Errorf("Expected exit code 0, got %d; stderr: %s", exitCode, stderr)
+	}
+	if !strings.Contains(stderr, "0.02") {
+		t.Errorf("Expected cost info with --cost --dry-run, got: %q", stderr)
+	}
+}

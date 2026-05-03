@@ -59,7 +59,8 @@ func printUsage() {
 	fmt.Fprintln(os.Stderr, "  --version        Show version")
 	fmt.Fprintln(os.Stderr, "  -q, --quiet      Suppress cost output")
 	fmt.Fprintln(os.Stderr, "  --dry-run        Show what would happen without calling the API")
-	fmt.Fprintln(os.Stderr, "  -p, --preview    Open the image after generation (requires preview_command in config)")
+	fmt.Fprintln(os.Stderr, "  --cost           Query pricing for the configured model (no generation)")
+	fmt.Fprintln(os.Stderr, "  -p, --preview    Open the image after generation (requires preview-command in config)")
 }
 
 func run() int {
@@ -67,6 +68,7 @@ func run() int {
 	quiet := false
 	dryRun := false
 	preview := false
+	costQuery := false
 	var outputPath string
 
 	for _, arg := range os.Args[1:] {
@@ -81,6 +83,8 @@ func run() int {
 			quiet = true
 		case "--dry-run":
 			dryRun = true
+		case "--cost":
+			costQuery = true
 		case "-p", "--preview":
 			preview = true
 		default:
@@ -99,7 +103,7 @@ func run() int {
 		}
 	}
 
-	if outputPath == "" {
+	if outputPath == "" && !costQuery {
 		printUsage()
 		return 2
 	}
@@ -107,6 +111,12 @@ func run() int {
 	if quiet && dryRun {
 		fmt.Fprintln(os.Stderr, "Error: --quiet and --dry-run cannot be used together")
 		return 2
+	}
+
+	// --cost skips stdin, generation, and file output.
+	// Handle it after config loading but before prompt reading.
+	if costQuery {
+		return runCostQuery(quiet)
 	}
 
 	// Read prompt from stdin.
@@ -235,6 +245,157 @@ func defaultPreviewCommand() string {
 	default:
 		return "xdg-open"
 	}
+}
+
+// runCostQuery handles the --cost flag: queries pricing without generating an image.
+func runCostQuery(quiet bool) int {
+	if quiet {
+		return 0
+	}
+
+	exePath, err := os.Executable()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error resolving executable path: %v\n", err)
+		return 1
+	}
+	exePath, err = filepath.EvalSymlinks(exePath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error resolving symlinks: %v\n", err)
+		return 1
+	}
+	binDir := filepath.Dir(exePath)
+	confDir := configDir(binDir)
+
+	cfg, err := loadConfig(filepath.Join(confDir, "config.yaml"))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		return 1
+	}
+
+	falKey, err := resolveFALKey(cfg, confDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		return 1
+	}
+
+	baseURL := os.Getenv("FAL_BASE_URL")
+	if baseURL == "" {
+		baseURL = "https://fal.run"
+	}
+	pricingBase := baseURL
+	if pricingBase == "https://fal.run" {
+		pricingBase = "https://api.fal.ai"
+	}
+
+	client := &http.Client{Timeout: 30 * time.Second}
+
+	fmt.Fprintf(os.Stderr, "Model: %s\n", cfg.Model)
+
+	// 1. Unit price lookup
+	unitPrice, unit, err := fetchUnitPrice(client, pricingBase, cfg.Model, falKey)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Unit price: not available (%v)\n", err)
+	} else {
+		fmt.Fprintf(os.Stderr, "Unit price: $%.2f per %s (source: FAL API)\n", unitPrice, unit)
+	}
+
+	// 2. Historical cost estimate
+	estimate, err := fetchHistoricalEstimate(client, pricingBase, cfg.Model, falKey)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "Estimated cost: not available (no usage history for this model)")
+	} else {
+		fmt.Fprintf(os.Stderr, "Estimated cost: $%.4f per call based on usage history (source: FAL API)\n", estimate)
+	}
+
+	return 0
+}
+
+// fetchUnitPrice queries the FAL unit pricing endpoint.
+func fetchUnitPrice(client *http.Client, pricingBase, model, falKey string) (float64, string, error) {
+	url := fmt.Sprintf("%s/v1/models/pricing?endpoint_id=%s", pricingBase, model)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return 0, "", err
+	}
+	req.Header.Set("Authorization", "Key "+falKey)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return 0, "", fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return 0, "", err
+	}
+
+	var pricing pricingResponse
+	if err := json.Unmarshal(body, &pricing); err != nil {
+		return 0, "", err
+	}
+
+	if len(pricing.Prices) == 0 {
+		return 0, "", fmt.Errorf("no pricing data")
+	}
+
+	return pricing.Prices[0].UnitPrice, pricing.Prices[0].Unit, nil
+}
+
+// estimateResponse represents the FAL cost estimation API response.
+type estimateResponse struct {
+	TotalCost float64 `json:"total_cost"`
+	Currency  string  `json:"currency"`
+}
+
+// fetchHistoricalEstimate queries the FAL historical cost estimation endpoint.
+func fetchHistoricalEstimate(client *http.Client, pricingBase, model, falKey string) (float64, error) {
+	url := fmt.Sprintf("%s/v1/models/pricing/estimate", pricingBase)
+
+	reqBody, err := json.Marshal(map[string]interface{}{
+		"estimate_type": "historical_api_price",
+		"endpoints": map[string]interface{}{
+			model: map[string]interface{}{
+				"call_quantity": 1,
+			},
+		},
+	})
+	if err != nil {
+		return 0, err
+	}
+
+	req, err := http.NewRequest("POST", url, strings.NewReader(string(reqBody)))
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Key "+falKey)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return 0, fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return 0, err
+	}
+
+	var estimate estimateResponse
+	if err := json.Unmarshal(body, &estimate); err != nil {
+		return 0, err
+	}
+
+	return estimate.TotalCost, nil
 }
 
 // resolveFALKey resolves the FAL API key via priority chain:
