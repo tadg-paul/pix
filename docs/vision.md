@@ -1,4 +1,4 @@
-<!-- Version: 0.1 | Last updated: 2026-05-02 -->
+<!-- Version: 0.2 | Last updated: 2026-05-03 -->
 
 # Vision
 
@@ -7,76 +7,67 @@
 `generate-image` is a minimal CLI tool that generates images from text prompts via the [FAL API](https://fal.ai). It reads a prompt from stdin, sends it to a configurable model, and writes the resulting image to disk.
 
 ```bash
-cat description.txt | generate-image sunset.png
-echo "a sunset over Dublin Bay" | generate-image sunset.png
+echo "a sunset over Dublin Bay" | generate-image sunset
+cat description.txt | generate-image --preview poster
 ```
 
-The first argument is the output filename. It is required.
+The first argument is the output filename. An extension is optional -- if omitted, the API response format is used.
 
 ## Goals
 
 - **Single responsibility:** one prompt in, one image out.
-- **Zero friction:** `make install` places the executable on `PATH`; a `.env` file and a small YAML config are the only setup.
-- **Pipeline-friendly:** reads stdin, writes a file, prints the output path to stdout. No interactive prompts.
-- **Cost-aware:** reports generation cost to stderr when the FAL API provides pricing information.
+- **Zero friction:** `make install` places the binary on `PATH`; a YAML config file is the only setup.
+- **Pipeline-friendly:** reads stdin, writes a file, reports status to stderr. No interactive prompts.
+- **Cost-aware:** reports generation cost to stderr when the FAL pricing API has data.
 
 ## Non-goals (for now)
 
 - GUI or web interface.
 - Batch generation or multi-image output.
-- Image-to-image, inpainting, or editing workflows.
 - Video generation.
 - Provider abstraction (FAL is the only backend).
 
-## How It Works
+## How it works
 
-1. The tool requires one argument: the output filename. It fails if none is provided.
+1. The tool takes an output filename as its argument. Flags (`--quiet`, `--dry-run`, `--preview`) are optional.
 2. It reads the text prompt from stdin.
-3. It loads the FAL API key from `.env` in the tool's install directory.
-4. It reads the model from `config.yaml` in the tool's install directory.
+3. It resolves the FAL API key via a priority chain: `FAL_KEY` env var, config command, config file, `.env` fallback.
+4. It reads the model from `config.yaml`.
 5. It calls the FAL API with the configured model and prompt.
-6. It downloads the resulting image and writes it to the output path.
-7. If the FAL API returns cost/pricing data, it reports the cost to stderr.
+6. It downloads the resulting image and writes it to the output path, handling extension detection and format conversion via ImageMagick if needed.
+7. It reports cost to stderr (unless `--quiet`).
+8. If `--preview` is specified, it opens the image in the configured viewer.
 
 ## Configuration
 
-### Environment (`.env`)
-
-```
-FAL_KEY=your-fal-api-key
-```
-
-The `.env` file lives alongside the script, not in the working directory. This allows the tool to be invoked from any directory without requiring a per-project `.env`.
-
-### Model configuration (`config.yaml`)
+### `config.yaml`
 
 ```yaml
-model: fal-ai/grok-2-aurora
+model: xai/grok-imagine-image
+
+api-keys:
+  fal:
+    command: op read op://vault/fal/credential
+    # file: /path/to/fal.key
+
+preview-command: chafa
 ```
 
-A single YAML file with one key for now. The default model is Grok. This file lives alongside the script and `.env`.
+The config file lives at `~/.config/generate-image/config.yaml`, with fallback to the binary directory for development.
+
+### API key resolution priority
+
+1. `FAL_KEY` environment variable
+2. `api-keys.fal.command` in config (runs a command, uses stdout)
+3. `api-keys.fal.file` in config (reads a file)
+4. `.env` file in the config directory (legacy fallback)
 
 ## Technology
 
-- **Language:** Python 3.12+
-- **FAL SDK:** `fal-client` (same library used by `storyboard-gen`)
-- **Config loading:** `python-dotenv` for `.env`, `PyYAML` for `config.yaml`
-- **Installation:** `make install` symlinks the entry point to `~/.local/bin/generate-image`
-
-## Roadmap
-
-Future extensions, in rough priority order. None of these are in scope for the initial release.
-
-| Feature | Description |
-|---------|-------------|
-| Output format selection | Support `--format png\|jpg\|webp` |
-| Image dimensions | Support `--width` and `--height` or `--size` presets |
-| Model override | `--model` flag to override `config.yaml` on a per-call basis |
-| Multiple models in config | Named model profiles in `config.yaml` |
-| Batch mode | Accept multiple prompts (one per line) and generate images in parallel |
-| Cost tracking | Cumulative cost log for budgeting |
-| Prompt templates | Reusable prompt fragments or prefix/suffix in config |
-| Provider abstraction | Support additional image generation APIs beyond FAL |
+- **Language:** Go 1.22+
+- **Dependencies:** `gopkg.in/yaml.v3` (config parsing). Standard library for everything else.
+- **Optional:** ImageMagick (`magick`) for format conversion
+- **Installation:** `make install` copies the binary to `~/.local/bin/generate-image`
 
 ## Licence
 

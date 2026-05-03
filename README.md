@@ -15,18 +15,12 @@ A minimal CLI tool that generates images from text prompts via the [FAL API](htt
 ### Install
 
 ```bash
-git clone https://github.com/tigger04/generate-image.git
+git clone https://github.com/tadg-paul/generate-image.git
 cd generate-image
 make install
 ```
 
-This compiles the binary to `~/.local/bin/generate-image` and copies `config.yaml` to `~/.config/generate-image/`. On first install, a template `.env` is created -- edit it to add the FAL API key:
-
-```bash
-vi ~/.config/generate-image/.env
-```
-
-Alternatively, set the `FAL_KEY` environment variable or configure a key command in `config.yaml` (see [Configuration](#configuration)).
+This compiles the binary to `~/.local/bin/generate-image` and creates `~/.config/generate-image/config.yaml` from the template. Edit it to configure the API key and model -- see [Configuration](#configuration).
 
 ### Usage
 
@@ -93,17 +87,22 @@ api-keys:
 
 If no file extension is provided, the API response format is used (typically `.jpg`). If the requested extension differs from the API format, ImageMagick (`magick`) converts automatically. If `magick` is not available, the tool exits with an error.
 
+## Documentation
+
+| Document | Description |
+|----------|-------------|
+| [Vision](docs/vision.md) | Project goals, how it works, technology choices |
+| [Architecture](docs/architecture.md) | Component overview, design decisions, [roadmap](docs/architecture.md#roadmap) |
+
 ## Project files
 
 | File | Purpose |
 |------|---------|
-| `main.go` | Single-file CLI entry point |
+| `main.go` | Single-file CLI entry point (~500 lines) |
 | `config.yaml` | Default model configuration |
-| `.env.example` | API key template |
 | `Makefile` | Build, test, install, lint targets |
 | `tests/regression/` | Regression test suite (30 tests) |
 | `tests/one_off/` | One-off tests |
-| `docs/vision.md` | Project vision and roadmap |
 
 ## Development
 

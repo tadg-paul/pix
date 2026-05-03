@@ -1,4 +1,4 @@
-module github.com/tigger04/generate-image
+module github.com/tadg-paul/generate-image
 
 go 1.26.2
 
