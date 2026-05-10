@@ -51,14 +51,16 @@ func pricingBaseURL() string {
 	return base
 }
 
-// generateImage calls the FAL API and returns the image bytes and content type.
-func generateImage(client *http.Client, baseURL, model, prompt, falKey string) ([]byte, string, error) {
-	reqBody, err := json.Marshal(map[string]string{"prompt": prompt})
+// generateImageWithPayload calls the FAL API with an arbitrary JSON payload
+// (which must include "prompt", may include "image_urls" for edit endpoints).
+// The endpoint string is appended to baseURL to form the full URL.
+func generateImageWithPayload(client *http.Client, baseURL, endpoint string, payload map[string]interface{}, falKey string) ([]byte, string, error) {
+	reqBody, err := json.Marshal(payload)
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to build request: %w", err)
 	}
 
-	url := fmt.Sprintf("%s/%s", baseURL, model)
+	url := fmt.Sprintf("%s/%s", baseURL, endpoint)
 	req, err := http.NewRequest("POST", url, strings.NewReader(string(reqBody)))
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to create request: %w", err)

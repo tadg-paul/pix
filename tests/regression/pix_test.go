@@ -1551,3 +1551,356 @@ func TestPix_help_with_subcommand_RT5_26(t *testing.T) {
 		t.Errorf("Expected top-level usage in error output, got: %q", stderr)
 	}
 }
+
+// --- Reference image / image edit tests (#4) ---
+
+// writeRefImage helper writes a fake image to disk with the given extension and content.
+func writeRefImage(t *testing.T, dir, name string, content []byte) string {
+	t.Helper()
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, content, 0644); err != nil {
+		t.Fatalf("Failed to write ref image %s: %v", path, err)
+	}
+	return path
+}
+
+// RT-4.1: Single reference image is base64-encoded and sent in image_urls.
+func TestGenImg_single_ref_base64_RT4_1(t *testing.T) {
+	bin := buildBinary(t)
+	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
+
+	refDir := t.TempDir()
+	refPath := writeRefImage(t, refDir, "ref.png", fakeImagePNG)
+
+	var capturedBody string
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPI(t, successHandler(t, imageServer, &capturedBody), nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	_, stderr, exitCode := runBinary(t, binPath, []string{"gen-img", refPath, outFile}, "make blue", []string{"FAL_BASE_URL=" + server.URL})
+
+	if exitCode != 0 {
+		t.Fatalf("Expected exit 0, got %d; stderr: %s", exitCode, stderr)
+	}
+
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(capturedBody), &parsed); err != nil {
+		t.Fatalf("Failed to parse request body: %v", err)
+	}
+	imageURLs, ok := parsed["image_urls"].([]interface{})
+	if !ok || len(imageURLs) != 1 {
+		t.Fatalf("Expected image_urls array with 1 entry, got: %v", parsed["image_urls"])
+	}
+	uri, _ := imageURLs[0].(string)
+	if !strings.HasPrefix(uri, "data:image/png;base64,") {
+		t.Errorf("Expected PNG data URI, got prefix: %q", uri[:min(40, len(uri))])
+	}
+}
+
+// RT-4.2: Multiple reference images (up to 3) are all sent.
+func TestGenImg_multiple_refs_RT4_2(t *testing.T) {
+	bin := buildBinary(t)
+	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
+
+	refDir := t.TempDir()
+	ref1 := writeRefImage(t, refDir, "ref1.png", fakeImagePNG)
+	ref2 := writeRefImage(t, refDir, "ref2.png", fakeImagePNG)
+	ref3 := writeRefImage(t, refDir, "ref3.png", fakeImagePNG)
+
+	var capturedBody string
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPI(t, successHandler(t, imageServer, &capturedBody), nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	_, stderr, exitCode := runBinary(t, binPath, []string{"gen-img", ref1, ref2, ref3, outFile}, "merge", []string{"FAL_BASE_URL=" + server.URL})
+
+	if exitCode != 0 {
+		t.Fatalf("Expected exit 0, got %d; stderr: %s", exitCode, stderr)
+	}
+
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(capturedBody), &parsed); err != nil {
+		t.Fatalf("Failed to parse request body: %v", err)
+	}
+	imageURLs, ok := parsed["image_urls"].([]interface{})
+	if !ok || len(imageURLs) != 3 {
+		t.Fatalf("Expected image_urls with 3 entries, got %d", len(imageURLs))
+	}
+}
+
+// RT-4.3: Edit endpoint (model path + /edit) is used when references are present.
+func TestGenImg_edit_endpoint_with_refs_RT4_3(t *testing.T) {
+	bin := buildBinary(t)
+	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
+
+	refDir := t.TempDir()
+	refPath := writeRefImage(t, refDir, "ref.png", fakeImagePNG)
+
+	var capturedPath string
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPI(t, func(w http.ResponseWriter, r *http.Request) {
+		capturedPath = r.URL.Path
+		resp := map[string]interface{}{
+			"images": []map[string]interface{}{
+				{"url": imageServer.URL + "/image.png"},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}, nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	runBinary(t, binPath, []string{"gen-img", refPath, outFile}, "edit", []string{"FAL_BASE_URL=" + server.URL})
+
+	if !strings.HasSuffix(capturedPath, "/edit") {
+		t.Errorf("Expected request path to end with /edit, got: %q", capturedPath)
+	}
+}
+
+// RT-4.4: Text-to-image endpoint is used when no references are present.
+func TestGenImg_text_endpoint_without_refs_RT4_4(t *testing.T) {
+	bin := buildBinary(t)
+	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
+
+	var capturedPath string
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPI(t, func(w http.ResponseWriter, r *http.Request) {
+		capturedPath = r.URL.Path
+		resp := map[string]interface{}{
+			"images": []map[string]interface{}{
+				{"url": imageServer.URL + "/image.png"},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}, nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	runBinary(t, binPath, []string{"gen-img", outFile}, "a cat", []string{"FAL_BASE_URL=" + server.URL})
+
+	if strings.HasSuffix(capturedPath, "/edit") {
+		t.Errorf("Expected text-to-image endpoint without refs, got: %q", capturedPath)
+	}
+}
+
+// RT-4.5: Last positional is always the target, regardless of refs.
+func TestGenImg_last_positional_is_target_RT4_5(t *testing.T) {
+	bin := buildBinary(t)
+	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
+
+	refDir := t.TempDir()
+	ref1 := writeRefImage(t, refDir, "ref1.png", fakeImagePNG)
+	ref2 := writeRefImage(t, refDir, "ref2.png", fakeImagePNG)
+
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPI(t, successHandler(t, imageServer, nil), nil)
+
+	outDir := t.TempDir()
+	target := filepath.Join(outDir, "result.png")
+	runBinary(t, binPath, []string{"gen-img", ref1, ref2, target}, "merge", []string{"FAL_BASE_URL=" + server.URL})
+
+	if _, err := os.Stat(target); err != nil {
+		t.Errorf("Expected target file %s to exist: %v", target, err)
+	}
+}
+
+// RT-4.6: Nonexistent reference exits non-zero with clear error.
+func TestGenImg_nonexistent_ref_RT4_6(t *testing.T) {
+	bin := buildBinary(t)
+	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
+
+	apiCalled := false
+	server := startFakeAPI(t, func(w http.ResponseWriter, r *http.Request) {
+		apiCalled = true
+	}, nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	_, stderr, exitCode := runBinary(t, binPath, []string{"gen-img", "/nonexistent/ref.png", outFile}, "edit", []string{"FAL_BASE_URL=" + server.URL})
+
+	if exitCode == 0 {
+		t.Errorf("Expected non-zero exit for nonexistent ref")
+	}
+	if apiCalled {
+		t.Errorf("API should not be called when ref validation fails")
+	}
+	if stderr == "" {
+		t.Errorf("Expected error message")
+	}
+}
+
+// RT-4.7: Non-image extension exits non-zero.
+func TestGenImg_non_image_ref_extension_RT4_7(t *testing.T) {
+	bin := buildBinary(t)
+	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
+
+	refDir := t.TempDir()
+	textPath := writeRefImage(t, refDir, "notes.txt", []byte("not an image"))
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	_, stderr, exitCode := runBinary(t, binPath, []string{"gen-img", textPath, outFile}, "edit", nil)
+
+	if exitCode == 0 {
+		t.Errorf("Expected non-zero exit for non-image extension")
+	}
+	if stderr == "" {
+		t.Errorf("Expected error message")
+	}
+}
+
+// RT-4.8: Four references exits non-zero.
+func TestGenImg_too_many_refs_RT4_8(t *testing.T) {
+	bin := buildBinary(t)
+	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
+
+	refDir := t.TempDir()
+	r1 := writeRefImage(t, refDir, "r1.png", fakeImagePNG)
+	r2 := writeRefImage(t, refDir, "r2.png", fakeImagePNG)
+	r3 := writeRefImage(t, refDir, "r3.png", fakeImagePNG)
+	r4 := writeRefImage(t, refDir, "r4.png", fakeImagePNG)
+
+	apiCalled := false
+	server := startFakeAPI(t, func(w http.ResponseWriter, r *http.Request) {
+		apiCalled = true
+	}, nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	_, stderr, exitCode := runBinary(t, binPath, []string{"gen-img", r1, r2, r3, r4, outFile}, "edit", []string{"FAL_BASE_URL=" + server.URL})
+
+	if exitCode == 0 {
+		t.Errorf("Expected non-zero exit for >3 refs")
+	}
+	if apiCalled {
+		t.Errorf("API should not be called when too many refs")
+	}
+	if stderr == "" {
+		t.Errorf("Expected error message")
+	}
+}
+
+// RT-4.9: Warning printed for each reference image.
+func TestGenImg_ref_warning_RT4_9(t *testing.T) {
+	bin := buildBinary(t)
+	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
+
+	refDir := t.TempDir()
+	ref1 := writeRefImage(t, refDir, "ref1.png", fakeImagePNG)
+	ref2 := writeRefImage(t, refDir, "ref2.png", fakeImagePNG)
+
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPI(t, successHandler(t, imageServer, nil), nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	_, stderr, _ := runBinary(t, binPath, []string{"gen-img", ref1, ref2, outFile}, "merge", []string{"FAL_BASE_URL=" + server.URL})
+
+	if !strings.Contains(stderr, "ref1.png") {
+		t.Errorf("Expected warning mentioning ref1.png, got: %q", stderr)
+	}
+	if !strings.Contains(stderr, "ref2.png") {
+		t.Errorf("Expected warning mentioning ref2.png, got: %q", stderr)
+	}
+}
+
+// RT-4.10: --quiet suppresses warning.
+func TestGenImg_quiet_suppresses_warning_RT4_10(t *testing.T) {
+	bin := buildBinary(t)
+	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
+
+	refDir := t.TempDir()
+	refPath := writeRefImage(t, refDir, "myref.png", fakeImagePNG)
+
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPI(t, successHandler(t, imageServer, nil), nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	_, stderr, _ := runBinary(t, binPath, []string{"--quiet", "gen-img", refPath, outFile}, "edit", []string{"FAL_BASE_URL=" + server.URL})
+
+	if strings.Contains(stderr, "myref.png") {
+		t.Errorf("Expected no ref warning with --quiet, got: %q", stderr)
+	}
+}
+
+// RT-4.11: Piped stdin reads all input (regression check on existing behaviour).
+func TestGenImg_piped_stdin_reads_all_RT4_11(t *testing.T) {
+	bin := buildBinary(t)
+	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
+
+	var capturedBody string
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPI(t, successHandler(t, imageServer, &capturedBody), nil)
+
+	multilinePrompt := "first line\nsecond line\nthird line"
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	runBinary(t, binPath, []string{"gen-img", outFile}, multilinePrompt, []string{"FAL_BASE_URL=" + server.URL})
+
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(capturedBody), &parsed); err != nil {
+		t.Fatalf("Failed to parse body: %v", err)
+	}
+	prompt, _ := parsed["prompt"].(string)
+	if !strings.Contains(prompt, "second line") {
+		t.Errorf("Expected full multi-line prompt, got: %q", prompt)
+	}
+}
+
+// RT-4.12: --dry-run with refs shows edit endpoint URL.
+func TestGenImg_dry_run_refs_shows_edit_endpoint_RT4_12(t *testing.T) {
+	bin := buildBinary(t)
+	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
+
+	refDir := t.TempDir()
+	refPath := writeRefImage(t, refDir, "ref.png", fakeImagePNG)
+
+	apiCalled := false
+	server := startFakeAPI(t, func(w http.ResponseWriter, r *http.Request) {
+		apiCalled = true
+	}, nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	_, stderr, exitCode := runBinary(t, binPath, []string{"gen-img", "--dry-run", refPath, outFile}, "edit", []string{"FAL_BASE_URL=" + server.URL})
+
+	if exitCode != 0 {
+		t.Errorf("Expected exit 0, got %d; stderr: %s", exitCode, stderr)
+	}
+	if apiCalled {
+		t.Errorf("API should not be called during --dry-run")
+	}
+	if !strings.Contains(stderr, "/edit") {
+		t.Errorf("Expected /edit endpoint in dry-run output, got: %q", stderr)
+	}
+}
+
+// RT-4.13: --dry-run with refs lists reference filenames.
+func TestGenImg_dry_run_refs_lists_filenames_RT4_13(t *testing.T) {
+	bin := buildBinary(t)
+	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
+
+	refDir := t.TempDir()
+	refPath := writeRefImage(t, refDir, "myunique-ref.png", fakeImagePNG)
+
+	server := startFakeAPI(t, nil, nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	_, stderr, _ := runBinary(t, binPath, []string{"gen-img", "--dry-run", refPath, outFile}, "edit", []string{"FAL_BASE_URL=" + server.URL})
+
+	if !strings.Contains(stderr, "myunique-ref.png") {
+		t.Errorf("Expected ref filename in dry-run output, got: %q", stderr)
+	}
+}
+
+// RT-4.14: --dry-run does not include base64 image data in output.
+func TestGenImg_dry_run_no_base64_RT4_14(t *testing.T) {
+	bin := buildBinary(t)
+	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
+
+	refDir := t.TempDir()
+	refPath := writeRefImage(t, refDir, "ref.png", fakeImagePNG)
+
+	server := startFakeAPI(t, nil, nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	_, stderr, _ := runBinary(t, binPath, []string{"gen-img", "--dry-run", refPath, outFile}, "edit", []string{"FAL_BASE_URL=" + server.URL})
+
+	if strings.Contains(stderr, "data:image/png;base64,") {
+		t.Errorf("Dry-run should not include base64 data, got: %q", stderr)
+	}
+}

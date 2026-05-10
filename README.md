@@ -49,13 +49,25 @@ Output: test
 Model: xai/grok-imagine-image
 Unit price: $0.02 per images (source: FAL API)
 Estimated cost: $0.0200 per call based on usage history (source: FAL API)
+
+> echo "make the sky purple" | pix gen-img photo.jpg edited
+# Earlier positionals that exist as image files become reference images.
+# The last positional is always the target.
+⚠️  Using photo.jpg as reference image (will be sent to FAL)
+Cost: $0.02 (unit: images) for model xai/grok-imagine-image (source: FAL API)
+Wrote edited.jpg
+
+> echo "merge these" | pix gen-img a.jpg b.jpg merged
+⚠️  Using a.jpg as reference image (will be sent to FAL)
+⚠️  Using b.jpg as reference image (will be sent to FAL)
+Wrote merged.jpg
 ```
 
 ### Subcommands
 
 | Subcommand | Description |
 |------------|-------------|
-| `gen-img <output>` | Generate an image from a prompt on stdin |
+| `gen-img [refs...] <output>` | Generate or edit an image from a prompt on stdin. Earlier positionals are reference images (max 3); the last is the target. |
 | `cost` | Query pricing for the configured model (no generation) |
 
 Run `pix <subcommand> --help` for subcommand-specific usage.

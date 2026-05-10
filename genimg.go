@@ -1,9 +1,11 @@
-// ABOUTME: gen-img subcommand handler -- generates images from text prompts.
-// ABOUTME: Reads prompt from stdin, writes image to specified output path.
+// ABOUTME: gen-img subcommand handler -- generates or edits images via the FAL API.
+// ABOUTME: Reads prompt from stdin, writes image to specified output path. Supports reference images.
 
 package main
 
 import (
+	"bufio"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -16,10 +18,16 @@ import (
 	"time"
 )
 
+const maxRefImages = 3
+
 func printGenImgUsage() {
-	fmt.Fprintln(os.Stderr, "Usage: pix gen-img [flags] <output-file>")
+	fmt.Fprintln(os.Stderr, "Usage: pix gen-img [flags] [reference-images...] <output-file>")
 	fmt.Fprintln(os.Stderr, "")
 	fmt.Fprintln(os.Stderr, "Reads a text prompt from stdin and generates an image via the FAL API.")
+	fmt.Fprintln(os.Stderr, "")
+	fmt.Fprintln(os.Stderr, "If earlier positional arguments are existing image files, they are sent")
+	fmt.Fprintln(os.Stderr, "as references to the model's edit endpoint (max 3). The last positional")
+	fmt.Fprintln(os.Stderr, "is always the target output filename.")
 	fmt.Fprintln(os.Stderr, "")
 	fmt.Fprintln(os.Stderr, "Flags:")
 	fmt.Fprintln(os.Stderr, "  -h, --help       Show this help message")
@@ -36,7 +44,7 @@ func runGenImg(args []string, globalQuiet bool) int {
 	dryRun := false
 	preview := false
 	helpRequested := false
-	var outputPath string
+	var positionals []string
 
 	for _, arg := range args {
 		switch arg {
@@ -56,19 +64,13 @@ func runGenImg(args []string, globalQuiet bool) int {
 				printGenImgUsage()
 				return 2
 			}
-			if outputPath == "" {
-				outputPath = arg
-			} else {
-				fmt.Fprintln(os.Stderr, "Error: too many arguments")
-				printGenImgUsage()
-				return 2
-			}
+			positionals = append(positionals, arg)
 		}
 	}
 
 	// --help is mutually exclusive with all other args/flags.
 	if helpRequested {
-		hasOther := dryRun || preview || outputPath != ""
+		hasOther := dryRun || preview || len(positionals) > 0
 		if hasOther {
 			fmt.Fprintln(os.Stderr, "Error: --help cannot be combined with other flags or arguments")
 			printGenImgUsage()
@@ -78,7 +80,7 @@ func runGenImg(args []string, globalQuiet bool) int {
 		return 0
 	}
 
-	if outputPath == "" {
+	if len(positionals) == 0 {
 		printGenImgUsage()
 		return 2
 	}
@@ -88,12 +90,27 @@ func runGenImg(args []string, globalQuiet bool) int {
 		return 2
 	}
 
-	stdinBytes, err := io.ReadAll(os.Stdin)
+	// Last positional is target; earlier ones are reference images.
+	outputPath := positionals[len(positionals)-1]
+	refs := positionals[:len(positionals)-1]
+
+	if len(refs) > maxRefImages {
+		fmt.Fprintf(os.Stderr, "Error: maximum %d reference images supported (got %d)\n", maxRefImages, len(refs))
+		return 1
+	}
+
+	for _, ref := range refs {
+		if err := validateRefImage(ref); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			return 1
+		}
+	}
+
+	prompt, err := readPrompt()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error reading stdin: %v\n", err)
 		return 1
 	}
-	prompt := strings.TrimSpace(string(stdinBytes))
 	if prompt == "" {
 		fmt.Fprintln(os.Stderr, "Error: no prompt provided on stdin")
 		return 1
@@ -119,11 +136,36 @@ func runGenImg(args []string, globalQuiet bool) int {
 
 	baseURL := falBaseURL()
 
-	if dryRun {
-		url := fmt.Sprintf("%s/%s", baseURL, cfg.Model)
+	// Build endpoint and payload depending on whether refs are present.
+	endpoint := cfg.Model
+	payload := map[string]interface{}{"prompt": prompt}
+	if len(refs) > 0 {
+		endpoint = cfg.Model + "/edit"
+		uris := make([]string, 0, len(refs))
+		for _, ref := range refs {
+			uri, err := refToDataURI(ref)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				return 1
+			}
+			uris = append(uris, uri)
+		}
+		payload["image_urls"] = uris
+	}
 
-		payload := map[string]string{"prompt": prompt}
-		pretty, err := json.MarshalIndent(payload, "", "  ")
+	if dryRun {
+		url := fmt.Sprintf("%s/%s", baseURL, endpoint)
+
+		// For dry-run output, replace base64 data with filename references for readability.
+		displayPayload := map[string]interface{}{"prompt": prompt}
+		if len(refs) > 0 {
+			displayURLs := make([]string, 0, len(refs))
+			for _, ref := range refs {
+				displayURLs = append(displayURLs, fmt.Sprintf("<base64 of %s>", ref))
+			}
+			displayPayload["image_urls"] = displayURLs
+		}
+		pretty, err := json.MarshalIndent(displayPayload, "", "  ")
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error: failed to marshal dry-run payload: %v\n", err)
 			return 1
@@ -141,9 +183,16 @@ func runGenImg(args []string, globalQuiet bool) int {
 		previewCmd = defaultPreviewCommand()
 	}
 
+	// Print reference image warnings before the API call (unless quiet).
+	if !globalQuiet {
+		for _, ref := range refs {
+			fmt.Fprintf(os.Stderr, "⚠️  Using %s as reference image (will be sent to FAL)\n", ref)
+		}
+	}
+
 	client := &http.Client{Timeout: 120 * time.Second}
 
-	imageData, contentType, err := generateImage(client, baseURL, cfg.Model, prompt, falKey)
+	imageData, contentType, err := generateImageWithPayload(client, baseURL, endpoint, payload, falKey)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		return 1
@@ -177,6 +226,74 @@ func runGenImg(args []string, globalQuiet bool) int {
 	}
 
 	return 0
+}
+
+// readPrompt reads a prompt from stdin. If stdin is a TTY (interactive),
+// it reads a single line. If stdin is piped, it reads all input.
+func readPrompt() (string, error) {
+	stat, err := os.Stdin.Stat()
+	if err == nil && (stat.Mode()&os.ModeCharDevice) != 0 {
+		// TTY: read one line.
+		reader := bufio.NewReader(os.Stdin)
+		line, err := reader.ReadString('\n')
+		if err != nil && err != io.EOF {
+			return "", err
+		}
+		return strings.TrimSpace(line), nil
+	}
+
+	// Piped: read all.
+	bytes, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(bytes)), nil
+}
+
+// validateRefImage confirms the path exists, is a regular file, and has a
+// recognised image extension.
+func validateRefImage(path string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("reference image %s: %w", path, err)
+	}
+	if info.IsDir() {
+		return fmt.Errorf("reference image %s is a directory", path)
+	}
+	ext := strings.ToLower(filepath.Ext(path))
+	switch ext {
+	case ".jpg", ".jpeg", ".png", ".webp", ".gif":
+		return nil
+	default:
+		return fmt.Errorf("reference image %s: unrecognised extension %s (supported: .jpg, .jpeg, .png, .webp, .gif)", path, ext)
+	}
+}
+
+// refToDataURI reads an image file and returns it as a base64-encoded data URI.
+func refToDataURI(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("reading reference %s: %w", path, err)
+	}
+	mime := mimeFromExt(filepath.Ext(path))
+	encoded := base64.StdEncoding.EncodeToString(data)
+	return "data:" + mime + ";base64," + encoded, nil
+}
+
+// mimeFromExt maps a file extension to a MIME type.
+func mimeFromExt(ext string) string {
+	switch strings.ToLower(ext) {
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".png":
+		return "image/png"
+	case ".webp":
+		return "image/webp"
+	case ".gif":
+		return "image/gif"
+	default:
+		return "application/octet-stream"
+	}
 }
 
 // defaultPreviewCommand returns the platform-appropriate image viewer command.
