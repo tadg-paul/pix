@@ -176,7 +176,7 @@ func TestCLI_no_args_exits_nonzero_with_usage_RT1_1(t *testing.T) {
 	bin := buildBinary(t)
 	linkPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
 
-	_, stderr, exitCode := runBinary(t, linkPath, []string{"gen-img"}, "", nil)
+	_, stderr, exitCode := runBinary(t, linkPath, []string{"gen"}, "", nil)
 
 	if exitCode == 0 {
 		t.Errorf("Expected non-zero exit code, got 0")
@@ -193,7 +193,7 @@ func TestCLI_empty_stdin_exits_nonzero_RT1_2(t *testing.T) {
 	bin := buildBinary(t)
 	linkPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
 
-	_, stderr, exitCode := runBinary(t, linkPath, []string{"gen-img", "out.png"}, "", nil)
+	_, stderr, exitCode := runBinary(t, linkPath, []string{"gen", "out.png"}, "", nil)
 
 	if exitCode == 0 {
 		t.Errorf("Expected non-zero exit code, got 0")
@@ -210,7 +210,7 @@ func TestCLI_whitespace_stdin_exits_nonzero_RT1_3(t *testing.T) {
 	bin := buildBinary(t)
 	linkPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
 
-	_, stderr, exitCode := runBinary(t, linkPath, []string{"gen-img", "out.png"}, "   \n\t  \n", nil)
+	_, stderr, exitCode := runBinary(t, linkPath, []string{"gen", "out.png"}, "   \n\t  \n", nil)
 
 	if exitCode == 0 {
 		t.Errorf("Expected non-zero exit code, got 0")
@@ -228,7 +228,7 @@ func TestCLI_missing_fal_key_exits_nonzero_RT1_4(t *testing.T) {
 	// No FAL_KEY in .env
 	linkPath := setupEnv(t, bin, "", "model: fal-ai/grok-2-aurora\n")
 
-	_, stderr, exitCode := runBinary(t, linkPath, []string{"gen-img", "out.png"}, "a red cat", nil)
+	_, stderr, exitCode := runBinary(t, linkPath, []string{"gen", "out.png"}, "a red cat", nil)
 
 	if exitCode == 0 {
 		t.Errorf("Expected non-zero exit code, got 0")
@@ -247,7 +247,7 @@ func TestCLI_missing_config_exits_nonzero_RT1_5(t *testing.T) {
 	// No config.yaml
 	linkPath := setupEnv(t, bin, "test-key", "")
 
-	_, stderr, exitCode := runBinary(t, linkPath, []string{"gen-img", "out.png"}, "a red cat", nil)
+	_, stderr, exitCode := runBinary(t, linkPath, []string{"gen", "out.png"}, "a red cat", nil)
 
 	if exitCode == 0 {
 		t.Errorf("Expected non-zero exit code, got 0")
@@ -293,7 +293,7 @@ func TestCLI_env_loaded_from_binary_dir_not_cwd_RT1_6(t *testing.T) {
 
 	outFile := filepath.Join(t.TempDir(), "out.png")
 
-	cmd := exec.Command(binPath, "gen-img", outFile)
+	cmd := exec.Command(binPath, "gen", outFile)
 	cmd.Stdin = strings.NewReader("a red cat")
 	cmd.Dir = cwd
 	cmd.Env = append(os.Environ(), "FAL_BASE_URL="+server.URL)
@@ -331,7 +331,7 @@ func TestCLI_model_from_config_yaml_RT1_7(t *testing.T) {
 	}, nil)
 
 	outFile := filepath.Join(t.TempDir(), "out.png")
-	runBinary(t, linkPath, []string{"gen-img", outFile}, "a red cat", []string{"FAL_BASE_URL=" + server.URL})
+	runBinary(t, linkPath, []string{"gen", outFile}, "a red cat", []string{"FAL_BASE_URL=" + server.URL})
 
 	if !strings.Contains(capturedPath, customModel) {
 		t.Errorf("Expected request path to contain model %q, got path: %q", customModel, capturedPath)
@@ -355,7 +355,7 @@ func TestCLI_prompt_passed_to_api_RT1_8(t *testing.T) {
 
 	prompt := "a red cat sitting on a wall"
 	outFile := filepath.Join(t.TempDir(), "out.png")
-	runBinary(t, linkPath, []string{"gen-img", outFile}, prompt, []string{"FAL_BASE_URL=" + server.URL})
+	runBinary(t, linkPath, []string{"gen", outFile}, prompt, []string{"FAL_BASE_URL=" + server.URL})
 
 	var parsed map[string]interface{}
 	if err := json.Unmarshal([]byte(capturedBody), &parsed); err != nil {
@@ -381,7 +381,7 @@ func TestCLI_success_writes_image_file_RT1_9(t *testing.T) {
 	server := startFakeAPI(t, successHandler(t, imageServer, nil), nil)
 
 	outFile := filepath.Join(t.TempDir(), "out.png")
-	_, _, exitCode := runBinary(t, linkPath, []string{"gen-img", outFile}, "a red cat", []string{"FAL_BASE_URL=" + server.URL})
+	_, _, exitCode := runBinary(t, linkPath, []string{"gen", outFile}, "a red cat", []string{"FAL_BASE_URL=" + server.URL})
 
 	if exitCode != 0 {
 		t.Errorf("Expected exit code 0, got %d", exitCode)
@@ -413,7 +413,7 @@ func TestCLI_api_error_exits_nonzero_RT1_10(t *testing.T) {
 	}, nil)
 
 	outFile := filepath.Join(t.TempDir(), "out.png")
-	_, stderr, exitCode := runBinary(t, linkPath, []string{"gen-img", outFile}, "a red cat", []string{"FAL_BASE_URL=" + server.URL})
+	_, stderr, exitCode := runBinary(t, linkPath, []string{"gen", outFile}, "a red cat", []string{"FAL_BASE_URL=" + server.URL})
 
 	if exitCode == 0 {
 		t.Errorf("Expected non-zero exit code, got 0")
@@ -492,7 +492,7 @@ func TestCLI_cost_printed_when_available_RT1_13(t *testing.T) {
 	server := startFakeAPI(t, successHandler(t, imageServer, nil), pricingHandler)
 
 	outFile := filepath.Join(t.TempDir(), "out.png")
-	_, stderr, _ := runBinary(t, linkPath, []string{"gen-img", outFile}, "a red cat", []string{"FAL_BASE_URL=" + server.URL})
+	_, stderr, _ := runBinary(t, linkPath, []string{"gen", outFile}, "a red cat", []string{"FAL_BASE_URL=" + server.URL})
 
 	lower := strings.ToLower(stderr)
 	if !strings.Contains(lower, "cost") {
@@ -527,7 +527,7 @@ func TestCLI_no_cost_when_unavailable_RT1_14(t *testing.T) {
 	server := startFakeAPI(t, successHandler(t, imageServer, nil), pricingHandler)
 
 	outFile := filepath.Join(t.TempDir(), "out.png")
-	_, stderr, _ := runBinary(t, linkPath, []string{"gen-img", outFile}, "a red cat", []string{"FAL_BASE_URL=" + server.URL})
+	_, stderr, _ := runBinary(t, linkPath, []string{"gen", outFile}, "a red cat", []string{"FAL_BASE_URL=" + server.URL})
 
 	if strings.Contains(stderr, "Cost:") {
 		t.Errorf("Expected no cost line on stderr when pricing unavailable, got: %q", stderr)
@@ -546,7 +546,7 @@ func TestCLI_no_extension_writes_api_format_RT1_15(t *testing.T) {
 
 	outDir := t.TempDir()
 	outFile := filepath.Join(outDir, "sunset")
-	_, _, exitCode := runBinary(t, binPath, []string{"gen-img", outFile}, "a cat", []string{"FAL_BASE_URL=" + server.URL})
+	_, _, exitCode := runBinary(t, binPath, []string{"gen", outFile}, "a cat", []string{"FAL_BASE_URL=" + server.URL})
 
 	if exitCode != 0 {
 		t.Errorf("Expected exit code 0, got %d", exitCode)
@@ -577,7 +577,7 @@ func TestCLI_matching_extension_writes_as_is_RT1_16(t *testing.T) {
 
 	outDir := t.TempDir()
 	outFile := filepath.Join(outDir, "sunset.jpg")
-	_, _, exitCode := runBinary(t, binPath, []string{"gen-img", outFile}, "a cat", []string{"FAL_BASE_URL=" + server.URL})
+	_, _, exitCode := runBinary(t, binPath, []string{"gen", outFile}, "a cat", []string{"FAL_BASE_URL=" + server.URL})
 
 	if exitCode != 0 {
 		t.Errorf("Expected exit code 0, got %d", exitCode)
@@ -610,7 +610,7 @@ func TestCLI_mismatched_extension_with_magick_converts_RT1_17(t *testing.T) {
 
 	outDir := t.TempDir()
 	outFile := filepath.Join(outDir, "sunset.jpg")
-	_, stderr, exitCode := runBinary(t, binPath, []string{"gen-img", outFile}, "a cat", []string{"FAL_BASE_URL=" + server.URL})
+	_, stderr, exitCode := runBinary(t, binPath, []string{"gen", outFile}, "a cat", []string{"FAL_BASE_URL=" + server.URL})
 
 	if exitCode != 0 {
 		t.Fatalf("Expected exit code 0, got %d; stderr: %s", exitCode, stderr)
@@ -641,7 +641,7 @@ func TestCLI_mismatched_extension_without_magick_fails_RT1_18(t *testing.T) {
 	outFile := filepath.Join(outDir, "sunset.jpg")
 
 	// Set PATH to empty so magick cannot be found
-	_, stderr, exitCode := runBinary(t, binPath, []string{"gen-img", outFile}, "a cat", []string{
+	_, stderr, exitCode := runBinary(t, binPath, []string{"gen", outFile}, "a cat", []string{
 		"FAL_BASE_URL=" + server.URL,
 		"PATH=",
 	})
@@ -718,7 +718,7 @@ func TestCLI_env_var_takes_priority_RT1_19(t *testing.T) {
 	}, nil)
 
 	outFile := filepath.Join(t.TempDir(), "out.png")
-	runBinary(t, binPath, []string{"gen-img", outFile}, "a cat", []string{
+	runBinary(t, binPath, []string{"gen", outFile}, "a cat", []string{
 		"FAL_BASE_URL=" + server.URL,
 		"FAL_KEY=env-var-key",
 	})
@@ -751,7 +751,7 @@ func TestCLI_config_command_provides_key_RT1_20(t *testing.T) {
 	}, nil)
 
 	outFile := filepath.Join(t.TempDir(), "out.png")
-	runBinary(t, binPath, []string{"gen-img", outFile}, "a cat", []string{"FAL_BASE_URL=" + server.URL})
+	runBinary(t, binPath, []string{"gen", outFile}, "a cat", []string{"FAL_BASE_URL=" + server.URL})
 
 	if capturedAuth != "Key command-key" {
 		t.Errorf("Expected command key, got auth header: %q", capturedAuth)
@@ -785,7 +785,7 @@ func TestCLI_config_file_provides_key_RT1_21(t *testing.T) {
 	}, nil)
 
 	outFile := filepath.Join(t.TempDir(), "out.png")
-	runBinary(t, binPath, []string{"gen-img", outFile}, "a cat", []string{"FAL_BASE_URL=" + server.URL})
+	runBinary(t, binPath, []string{"gen", outFile}, "a cat", []string{"FAL_BASE_URL=" + server.URL})
 
 	if capturedAuth != "Key file-provided-key" {
 		t.Errorf("Expected file key, got auth header: %q", capturedAuth)
@@ -819,7 +819,7 @@ func TestCLI_command_beats_file_RT1_22(t *testing.T) {
 	}, nil)
 
 	outFile := filepath.Join(t.TempDir(), "out.png")
-	runBinary(t, binPath, []string{"gen-img", outFile}, "a cat", []string{"FAL_BASE_URL=" + server.URL})
+	runBinary(t, binPath, []string{"gen", outFile}, "a cat", []string{"FAL_BASE_URL=" + server.URL})
 
 	if capturedAuth != "Key command-wins" {
 		t.Errorf("Expected command key to win over file, got auth header: %q", capturedAuth)
@@ -848,7 +848,7 @@ func TestCLI_dotenv_fallback_RT1_23(t *testing.T) {
 	}, nil)
 
 	outFile := filepath.Join(t.TempDir(), "out.png")
-	runBinary(t, binPath, []string{"gen-img", outFile}, "a cat", []string{"FAL_BASE_URL=" + server.URL})
+	runBinary(t, binPath, []string{"gen", outFile}, "a cat", []string{"FAL_BASE_URL=" + server.URL})
 
 	if capturedAuth != "Key dotenv-fallback-key" {
 		t.Errorf("Expected .env fallback key, got auth header: %q", capturedAuth)
@@ -878,7 +878,7 @@ func TestCLI_quiet_suppresses_cost_RT1_24(t *testing.T) {
 	server := startFakeAPI(t, successHandler(t, imageServer, nil), pricingHandler)
 
 	outFile := filepath.Join(t.TempDir(), "out.png")
-	_, stderr, exitCode := runBinary(t, binPath, []string{"--quiet", "gen-img", outFile}, "a cat", []string{"FAL_BASE_URL=" + server.URL})
+	_, stderr, exitCode := runBinary(t, binPath, []string{"--quiet", "gen", outFile}, "a cat", []string{"FAL_BASE_URL=" + server.URL})
 
 	if exitCode != 0 {
 		t.Errorf("Expected exit code 0, got %d", exitCode)
@@ -909,7 +909,7 @@ func TestCLI_cost_printed_by_default_RT1_25(t *testing.T) {
 	server := startFakeAPI(t, successHandler(t, imageServer, nil), pricingHandler)
 
 	outFile := filepath.Join(t.TempDir(), "out.png")
-	_, stderr, _ := runBinary(t, binPath, []string{"gen-img", outFile}, "a cat", []string{"FAL_BASE_URL=" + server.URL})
+	_, stderr, _ := runBinary(t, binPath, []string{"gen", outFile}, "a cat", []string{"FAL_BASE_URL=" + server.URL})
 
 	if !strings.Contains(strings.ToLower(stderr), "cost") {
 		t.Errorf("Expected cost output by default, got: %q", stderr)
@@ -930,7 +930,7 @@ func TestCLI_dry_run_prints_summary_RT1_26(t *testing.T) {
 	}, nil)
 
 	outFile := filepath.Join(t.TempDir(), "out.png")
-	_, stderr, exitCode := runBinary(t, binPath, []string{"gen-img", "--dry-run", outFile}, "a red cat", []string{"FAL_BASE_URL=" + server.URL})
+	_, stderr, exitCode := runBinary(t, binPath, []string{"gen", "--dry-run", outFile}, "a red cat", []string{"FAL_BASE_URL=" + server.URL})
 
 	if exitCode != 0 {
 		t.Errorf("Expected exit code 0 for --dry-run, got %d", exitCode)
@@ -959,7 +959,7 @@ func TestCLI_dry_run_no_output_file_RT1_27(t *testing.T) {
 	server := startFakeAPI(t, nil, nil)
 
 	outFile := filepath.Join(t.TempDir(), "out.png")
-	runBinary(t, binPath, []string{"gen-img", "--dry-run", outFile}, "a cat", []string{"FAL_BASE_URL=" + server.URL})
+	runBinary(t, binPath, []string{"gen", "--dry-run", outFile}, "a cat", []string{"FAL_BASE_URL=" + server.URL})
 
 	if _, err := os.Stat(outFile); err == nil {
 		t.Errorf("Output file should not exist after --dry-run")
@@ -982,7 +982,7 @@ func TestCLI_preview_opens_image_RT1_28(t *testing.T) {
 	server := startFakeAPI(t, successHandler(t, imageServer, nil), nil)
 
 	outFile := filepath.Join(t.TempDir(), "out.png")
-	_, _, exitCode := runBinary(t, binPath, []string{"gen-img", "--preview", outFile}, "a cat", []string{"FAL_BASE_URL=" + server.URL})
+	_, _, exitCode := runBinary(t, binPath, []string{"gen", "--preview", outFile}, "a cat", []string{"FAL_BASE_URL=" + server.URL})
 
 	if exitCode != 0 {
 		t.Errorf("Expected exit code 0, got %d", exitCode)
@@ -1007,7 +1007,7 @@ func TestCLI_preview_without_config_uses_default_RT1_29(t *testing.T) {
 	server := startFakeAPI(t, successHandler(t, imageServer, nil), nil)
 
 	outFile := filepath.Join(t.TempDir(), "out.png")
-	_, stderr, exitCode := runBinary(t, binPath, []string{"gen-img", "--preview", outFile}, "a cat", []string{"FAL_BASE_URL=" + server.URL})
+	_, stderr, exitCode := runBinary(t, binPath, []string{"gen", "--preview", outFile}, "a cat", []string{"FAL_BASE_URL=" + server.URL})
 
 	// The default preview command (open/xdg-open) may fail in a headless test env,
 	// but the error should be about the preview command failing, NOT about
@@ -1027,7 +1027,7 @@ func TestCLI_quiet_and_dry_run_conflict_RT1_30(t *testing.T) {
 	bin := buildBinary(t)
 	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
 
-	_, stderr, exitCode := runBinary(t, binPath, []string{"--quiet", "gen-img", "--dry-run", "out.png"}, "a cat", nil)
+	_, stderr, exitCode := runBinary(t, binPath, []string{"--quiet", "gen", "--dry-run", "out.png"}, "a cat", nil)
 
 	if exitCode == 0 {
 		t.Errorf("Expected non-zero exit code for --quiet + --dry-run")
@@ -1294,7 +1294,7 @@ func TestPix_usage_lists_subcommands_RT5_3(t *testing.T) {
 
 	_, stderr, _ := runBinary(t, binPath, []string{"--help"}, "", nil)
 
-	if !strings.Contains(stderr, "gen-img") {
+	if !strings.Contains(stderr, "gen") {
 		t.Errorf("Expected 'gen-img' subcommand listed in usage, got: %q", stderr)
 	}
 	if !strings.Contains(stderr, "cost") {
@@ -1319,17 +1319,17 @@ func TestPix_unknown_subcommand_RT5_14(t *testing.T) {
 }
 
 // RT-5.15: pix gen-img --help prints gen-img-specific usage line.
-// Asserts on "Usage: pix generate-image" which the top-level usage does not contain.
+// Asserts on "Usage: pix generate" which the top-level usage does not contain.
 func TestPix_genimg_help_RT5_15(t *testing.T) {
 	bin := buildBinary(t)
 	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
 
-	_, stderr, exitCode := runBinary(t, binPath, []string{"gen-img", "--help"}, "", nil)
+	_, stderr, exitCode := runBinary(t, binPath, []string{"gen", "--help"}, "", nil)
 
 	if exitCode != 0 {
 		t.Errorf("Expected exit code 0 for gen-img --help, got %d", exitCode)
 	}
-	if !strings.Contains(stderr, "Usage: pix generate-image") {
+	if !strings.Contains(stderr, "Usage: pix generate") {
 		t.Errorf("Expected gen-img-specific usage line 'Usage: pix generate-image', got: %q", stderr)
 	}
 }
@@ -1355,12 +1355,12 @@ func TestPix_genimg_help_short_RT5_17(t *testing.T) {
 	bin := buildBinary(t)
 	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
 
-	_, stderr, exitCode := runBinary(t, binPath, []string{"gen-img", "-h"}, "", nil)
+	_, stderr, exitCode := runBinary(t, binPath, []string{"gen", "-h"}, "", nil)
 
 	if exitCode != 0 {
 		t.Errorf("Expected exit code 0 for gen-img -h, got %d", exitCode)
 	}
-	if !strings.Contains(stderr, "Usage: pix generate-image") {
+	if !strings.Contains(stderr, "Usage: pix generate") {
 		t.Errorf("Expected gen-img-specific usage, got: %q", stderr)
 	}
 }
@@ -1443,7 +1443,7 @@ func TestPix_genimg_help_exclusive_RT5_21(t *testing.T) {
 	)
 
 	outFile := filepath.Join(t.TempDir(), "out.png")
-	_, stderr, exitCode := runBinary(t, binPath, []string{"gen-img", outFile, "--help"}, "a cat", []string{"FAL_BASE_URL=" + server.URL})
+	_, stderr, exitCode := runBinary(t, binPath, []string{"gen", outFile, "--help"}, "a cat", []string{"FAL_BASE_URL=" + server.URL})
 
 	if exitCode == 0 {
 		t.Errorf("Expected non-zero exit when --help combined with other args, got 0")
@@ -1451,7 +1451,7 @@ func TestPix_genimg_help_exclusive_RT5_21(t *testing.T) {
 	if apiCalled {
 		t.Errorf("API should not be called when --help is present")
 	}
-	if !strings.Contains(stderr, "Usage: pix generate-image") {
+	if !strings.Contains(stderr, "Usage: pix generate") {
 		t.Errorf("Expected gen-img usage in error output, got: %q", stderr)
 	}
 	if _, err := os.Stat(outFile); err == nil {
@@ -1478,7 +1478,7 @@ func TestPix_global_quiet_correct_position_RT5_22(t *testing.T) {
 	server := startFakeAPI(t, successHandler(t, imageServer, nil), pricingHandler)
 
 	outFile := filepath.Join(t.TempDir(), "out.png")
-	_, stderr, exitCode := runBinary(t, binPath, []string{"--quiet", "gen-img", outFile}, "a cat", []string{"FAL_BASE_URL=" + server.URL})
+	_, stderr, exitCode := runBinary(t, binPath, []string{"--quiet", "gen", outFile}, "a cat", []string{"FAL_BASE_URL=" + server.URL})
 
 	if exitCode != 0 {
 		t.Errorf("Expected exit code 0, got %d; stderr: %s", exitCode, stderr)
@@ -1494,7 +1494,7 @@ func TestPix_global_quiet_wrong_position_RT5_23(t *testing.T) {
 	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
 
 	outFile := filepath.Join(t.TempDir(), "out.png")
-	_, stderr, exitCode := runBinary(t, binPath, []string{"gen-img", "--quiet", outFile}, "a cat", nil)
+	_, stderr, exitCode := runBinary(t, binPath, []string{"gen", "--quiet", outFile}, "a cat", nil)
 
 	if exitCode == 0 {
 		t.Errorf("Expected non-zero exit for misplaced global flag")
@@ -1510,7 +1510,7 @@ func TestPix_subcommand_flag_wrong_position_RT5_24(t *testing.T) {
 	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
 
 	outFile := filepath.Join(t.TempDir(), "out.png")
-	_, stderr, exitCode := runBinary(t, binPath, []string{"--dry-run", "gen-img", outFile}, "a cat", nil)
+	_, stderr, exitCode := runBinary(t, binPath, []string{"--dry-run", "gen", outFile}, "a cat", nil)
 
 	if exitCode == 0 {
 		t.Errorf("Expected non-zero exit for misplaced subcommand flag")
@@ -1541,7 +1541,7 @@ func TestPix_help_with_subcommand_RT5_26(t *testing.T) {
 	bin := buildBinary(t)
 	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
 
-	_, stderr, exitCode := runBinary(t, binPath, []string{"--help", "gen-img"}, "", nil)
+	_, stderr, exitCode := runBinary(t, binPath, []string{"--help", "gen"}, "", nil)
 
 	if exitCode == 0 {
 		t.Errorf("Expected non-zero exit when --help combined with subcommand")
@@ -1577,7 +1577,7 @@ func TestGenImg_single_ref_base64_RT4_1(t *testing.T) {
 	server := startFakeAPI(t, successHandler(t, imageServer, &capturedBody), nil)
 
 	outFile := filepath.Join(t.TempDir(), "out.png")
-	_, stderr, exitCode := runBinary(t, binPath, []string{"gen-img", refPath, outFile}, "make blue", []string{"FAL_BASE_URL=" + server.URL})
+	_, stderr, exitCode := runBinary(t, binPath, []string{"gen", refPath, outFile}, "make blue", []string{"FAL_BASE_URL=" + server.URL})
 
 	if exitCode != 0 {
 		t.Fatalf("Expected exit 0, got %d; stderr: %s", exitCode, stderr)
@@ -1612,7 +1612,7 @@ func TestGenImg_multiple_refs_RT4_2(t *testing.T) {
 	server := startFakeAPI(t, successHandler(t, imageServer, &capturedBody), nil)
 
 	outFile := filepath.Join(t.TempDir(), "out.png")
-	_, stderr, exitCode := runBinary(t, binPath, []string{"gen-img", ref1, ref2, ref3, outFile}, "merge", []string{"FAL_BASE_URL=" + server.URL})
+	_, stderr, exitCode := runBinary(t, binPath, []string{"gen", ref1, ref2, ref3, outFile}, "merge", []string{"FAL_BASE_URL=" + server.URL})
 
 	if exitCode != 0 {
 		t.Fatalf("Expected exit 0, got %d; stderr: %s", exitCode, stderr)
@@ -1650,7 +1650,7 @@ func TestGenImg_edit_endpoint_with_refs_RT4_3(t *testing.T) {
 	}, nil)
 
 	outFile := filepath.Join(t.TempDir(), "out.png")
-	runBinary(t, binPath, []string{"gen-img", refPath, outFile}, "edit", []string{"FAL_BASE_URL=" + server.URL})
+	runBinary(t, binPath, []string{"gen", refPath, outFile}, "edit", []string{"FAL_BASE_URL=" + server.URL})
 
 	if !strings.HasSuffix(capturedPath, "/edit") {
 		t.Errorf("Expected request path to end with /edit, got: %q", capturedPath)
@@ -1676,7 +1676,7 @@ func TestGenImg_text_endpoint_without_refs_RT4_4(t *testing.T) {
 	}, nil)
 
 	outFile := filepath.Join(t.TempDir(), "out.png")
-	runBinary(t, binPath, []string{"gen-img", outFile}, "a cat", []string{"FAL_BASE_URL=" + server.URL})
+	runBinary(t, binPath, []string{"gen", outFile}, "a cat", []string{"FAL_BASE_URL=" + server.URL})
 
 	if strings.HasSuffix(capturedPath, "/edit") {
 		t.Errorf("Expected text-to-image endpoint without refs, got: %q", capturedPath)
@@ -1697,7 +1697,7 @@ func TestGenImg_last_positional_is_target_RT4_5(t *testing.T) {
 
 	outDir := t.TempDir()
 	target := filepath.Join(outDir, "result.png")
-	runBinary(t, binPath, []string{"gen-img", ref1, ref2, target}, "merge", []string{"FAL_BASE_URL=" + server.URL})
+	runBinary(t, binPath, []string{"gen", ref1, ref2, target}, "merge", []string{"FAL_BASE_URL=" + server.URL})
 
 	if _, err := os.Stat(target); err != nil {
 		t.Errorf("Expected target file %s to exist: %v", target, err)
@@ -1715,7 +1715,7 @@ func TestGenImg_nonexistent_ref_RT4_6(t *testing.T) {
 	}, nil)
 
 	outFile := filepath.Join(t.TempDir(), "out.png")
-	_, stderr, exitCode := runBinary(t, binPath, []string{"gen-img", "/nonexistent/ref.png", outFile}, "edit", []string{"FAL_BASE_URL=" + server.URL})
+	_, stderr, exitCode := runBinary(t, binPath, []string{"gen", "/nonexistent/ref.png", outFile}, "edit", []string{"FAL_BASE_URL=" + server.URL})
 
 	if exitCode == 0 {
 		t.Errorf("Expected non-zero exit for nonexistent ref")
@@ -1737,7 +1737,7 @@ func TestGenImg_non_image_ref_extension_RT4_7(t *testing.T) {
 	textPath := writeRefImage(t, refDir, "notes.txt", []byte("not an image"))
 
 	outFile := filepath.Join(t.TempDir(), "out.png")
-	_, stderr, exitCode := runBinary(t, binPath, []string{"gen-img", textPath, outFile}, "edit", nil)
+	_, stderr, exitCode := runBinary(t, binPath, []string{"gen", textPath, outFile}, "edit", nil)
 
 	if exitCode == 0 {
 		t.Errorf("Expected non-zero exit for non-image extension")
@@ -1764,7 +1764,7 @@ func TestGenImg_too_many_refs_RT4_8(t *testing.T) {
 	}, nil)
 
 	outFile := filepath.Join(t.TempDir(), "out.png")
-	_, stderr, exitCode := runBinary(t, binPath, []string{"gen-img", r1, r2, r3, r4, outFile}, "edit", []string{"FAL_BASE_URL=" + server.URL})
+	_, stderr, exitCode := runBinary(t, binPath, []string{"gen", r1, r2, r3, r4, outFile}, "edit", []string{"FAL_BASE_URL=" + server.URL})
 
 	if exitCode == 0 {
 		t.Errorf("Expected non-zero exit for >3 refs")
@@ -1790,7 +1790,7 @@ func TestGenImg_ref_warning_RT4_9(t *testing.T) {
 	server := startFakeAPI(t, successHandler(t, imageServer, nil), nil)
 
 	outFile := filepath.Join(t.TempDir(), "out.png")
-	_, stderr, _ := runBinary(t, binPath, []string{"gen-img", ref1, ref2, outFile}, "merge", []string{"FAL_BASE_URL=" + server.URL})
+	_, stderr, _ := runBinary(t, binPath, []string{"gen", ref1, ref2, outFile}, "merge", []string{"FAL_BASE_URL=" + server.URL})
 
 	if !strings.Contains(stderr, "ref1.png") {
 		t.Errorf("Expected warning mentioning ref1.png, got: %q", stderr)
@@ -1812,7 +1812,7 @@ func TestGenImg_quiet_suppresses_warning_RT4_10(t *testing.T) {
 	server := startFakeAPI(t, successHandler(t, imageServer, nil), nil)
 
 	outFile := filepath.Join(t.TempDir(), "out.png")
-	_, stderr, _ := runBinary(t, binPath, []string{"--quiet", "gen-img", refPath, outFile}, "edit", []string{"FAL_BASE_URL=" + server.URL})
+	_, stderr, _ := runBinary(t, binPath, []string{"--quiet", "gen", refPath, outFile}, "edit", []string{"FAL_BASE_URL=" + server.URL})
 
 	if strings.Contains(stderr, "myref.png") {
 		t.Errorf("Expected no ref warning with --quiet, got: %q", stderr)
@@ -1830,7 +1830,7 @@ func TestGenImg_piped_stdin_reads_all_RT4_11(t *testing.T) {
 
 	multilinePrompt := "first line\nsecond line\nthird line"
 	outFile := filepath.Join(t.TempDir(), "out.png")
-	runBinary(t, binPath, []string{"gen-img", outFile}, multilinePrompt, []string{"FAL_BASE_URL=" + server.URL})
+	runBinary(t, binPath, []string{"gen", outFile}, multilinePrompt, []string{"FAL_BASE_URL=" + server.URL})
 
 	var parsed map[string]interface{}
 	if err := json.Unmarshal([]byte(capturedBody), &parsed); err != nil {
@@ -1856,7 +1856,7 @@ func TestGenImg_dry_run_refs_shows_edit_endpoint_RT4_12(t *testing.T) {
 	}, nil)
 
 	outFile := filepath.Join(t.TempDir(), "out.png")
-	_, stderr, exitCode := runBinary(t, binPath, []string{"gen-img", "--dry-run", refPath, outFile}, "edit", []string{"FAL_BASE_URL=" + server.URL})
+	_, stderr, exitCode := runBinary(t, binPath, []string{"gen", "--dry-run", refPath, outFile}, "edit", []string{"FAL_BASE_URL=" + server.URL})
 
 	if exitCode != 0 {
 		t.Errorf("Expected exit 0, got %d; stderr: %s", exitCode, stderr)
@@ -1880,7 +1880,7 @@ func TestGenImg_dry_run_refs_lists_filenames_RT4_13(t *testing.T) {
 	server := startFakeAPI(t, nil, nil)
 
 	outFile := filepath.Join(t.TempDir(), "out.png")
-	_, stderr, _ := runBinary(t, binPath, []string{"gen-img", "--dry-run", refPath, outFile}, "edit", []string{"FAL_BASE_URL=" + server.URL})
+	_, stderr, _ := runBinary(t, binPath, []string{"gen", "--dry-run", refPath, outFile}, "edit", []string{"FAL_BASE_URL=" + server.URL})
 
 	if !strings.Contains(stderr, "myunique-ref.png") {
 		t.Errorf("Expected ref filename in dry-run output, got: %q", stderr)
@@ -1898,7 +1898,7 @@ func TestGenImg_dry_run_no_base64_RT4_14(t *testing.T) {
 	server := startFakeAPI(t, nil, nil)
 
 	outFile := filepath.Join(t.TempDir(), "out.png")
-	_, stderr, _ := runBinary(t, binPath, []string{"gen-img", "--dry-run", refPath, outFile}, "edit", []string{"FAL_BASE_URL=" + server.URL})
+	_, stderr, _ := runBinary(t, binPath, []string{"gen", "--dry-run", refPath, outFile}, "edit", []string{"FAL_BASE_URL=" + server.URL})
 
 	if strings.Contains(stderr, "data:image/png;base64,") {
 		t.Errorf("Dry-run should not include base64 data, got: %q", stderr)
@@ -1914,7 +1914,7 @@ func TestGenImg_full_name_alias_RT4_15(t *testing.T) {
 	server := startFakeAPI(t, successHandler(t, imageServer, nil), nil)
 
 	outFile := filepath.Join(t.TempDir(), "out.png")
-	_, stderr, exitCode := runBinary(t, binPath, []string{"generate-image", outFile}, "a cat", []string{"FAL_BASE_URL=" + server.URL})
+	_, stderr, exitCode := runBinary(t, binPath, []string{"generate", outFile}, "a cat", []string{"FAL_BASE_URL=" + server.URL})
 
 	if exitCode != 0 {
 		t.Errorf("Expected exit 0 for 'generate-image' alias, got %d; stderr: %s", exitCode, stderr)
@@ -1924,173 +1924,36 @@ func TestGenImg_full_name_alias_RT4_15(t *testing.T) {
 	}
 }
 
-// RT-7.1: edit-image with one reference image dispatches and succeeds.
-// User action: runs "echo 'make blue' | pix edit-image photo.png out.png".
-// User observes: image written, no error.
+// RT-7.1 through RT-7.7: 🚫 REMOVED per issue #9 (edit-image subcommand
+// dropped 2026-05-12). Original tests covered AC7.1-AC7.7 of issue #7;
+// AC9.4 now covers the absence of edit-image dispatch.
+
 func TestEditImg_one_ref_succeeds_RT7_1(t *testing.T) {
-	bin := buildBinary(t)
-	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
-
-	refDir := t.TempDir()
-	refPath := writeRefImage(t, refDir, "ref.png", fakeImagePNG)
-
-	imageServer := newImageServer(t, fakeImagePNG, "image/png")
-	server := startFakeAPI(t, successHandler(t, imageServer, nil), nil)
-
-	outFile := filepath.Join(t.TempDir(), "out.png")
-	_, stderr, exitCode := runBinary(t, binPath, []string{"edit-image", refPath, outFile}, "make blue", []string{"FAL_BASE_URL=" + server.URL})
-
-	if exitCode != 0 {
-		t.Errorf("Expected exit 0 for edit-image with one ref, got %d; stderr: %s", exitCode, stderr)
-	}
-	if _, err := os.Stat(outFile); err != nil {
-		t.Errorf("Expected output file from edit-image, got: %v", err)
-	}
+	t.Skip("Superseded: edit-image subcommand removed per issue #9; see RT-9.7")
 }
 
-// RT-7.2: edit-image with no positional arguments exits non-zero with usage.
-// User action: types "pix edit-image" with no args.
-// User observes: usage text on stderr, non-zero exit.
 func TestEditImg_no_positionals_exits_nonzero_RT7_2(t *testing.T) {
-	bin := buildBinary(t)
-	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
-
-	_, stderr, exitCode := runBinary(t, binPath, []string{"edit-image"}, "", nil)
-
-	if exitCode == 0 {
-		t.Errorf("Expected non-zero exit code for edit-image with no args, got 0")
-	}
-	if !strings.Contains(strings.ToLower(stderr), "usage") {
-		t.Errorf("Expected usage on stderr, got: %q", stderr)
-	}
+	t.Skip("Superseded: edit-image subcommand removed per issue #9; see RT-9.7")
 }
 
-// RT-7.3: edit-image with only an output positional (no refs) exits non-zero
-// with an error explaining a reference image is required.
-// User action: runs "echo 'edit' | pix edit-image out.png" without supplying a reference.
-// User observes: error stating a reference image is required, non-zero exit.
 func TestEditImg_no_refs_exits_nonzero_RT7_3(t *testing.T) {
-	bin := buildBinary(t)
-	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
-
-	_, stderr, exitCode := runBinary(t, binPath, []string{"edit-image", "out.png"}, "edit", nil)
-
-	if exitCode == 0 {
-		t.Errorf("Expected non-zero exit code for edit-image without refs, got 0; stderr: %s", stderr)
-	}
-	lower := strings.ToLower(stderr)
-	if !strings.Contains(lower, "reference image") {
-		t.Errorf("Expected error mentioning reference image requirement, got: %q", stderr)
-	}
+	t.Skip("Superseded: edit-image subcommand removed per issue #9; see RT-9.7")
 }
 
-// RT-7.4: edit-image with one ref calls FAL's /edit endpoint.
-// User action: runs "echo 'edit' | pix edit-image photo.png out.png".
-// User observes: image written; under the hood the /edit endpoint is invoked.
 func TestEditImg_calls_edit_endpoint_RT7_4(t *testing.T) {
-	bin := buildBinary(t)
-	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
-
-	refDir := t.TempDir()
-	refPath := writeRefImage(t, refDir, "ref.png", fakeImagePNG)
-
-	var capturedPath string
-	imageServer := newImageServer(t, fakeImagePNG, "image/png")
-	server := startFakeAPI(t, func(w http.ResponseWriter, r *http.Request) {
-		capturedPath = r.URL.Path
-		resp := map[string]interface{}{
-			"images": []map[string]interface{}{
-				{"url": imageServer.URL + "/image.png"},
-			},
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
-	}, nil)
-
-	outFile := filepath.Join(t.TempDir(), "out.png")
-	runBinary(t, binPath, []string{"edit-image", refPath, outFile}, "edit", []string{"FAL_BASE_URL=" + server.URL})
-
-	if !strings.HasSuffix(capturedPath, "/edit") {
-		t.Errorf("Expected request path to end with /edit, got: %q", capturedPath)
-	}
+	t.Skip("Superseded: edit-image subcommand removed per issue #9; covered by RT-9.3")
 }
 
-// RT-7.5: edit-image with three reference images sends three image_urls.
-// User action: runs "pix edit-image a.png b.png c.png merged.png".
-// User observes: image written; payload contains three image_urls entries.
 func TestEditImg_three_refs_RT7_5(t *testing.T) {
-	bin := buildBinary(t)
-	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
-
-	refDir := t.TempDir()
-	r1 := writeRefImage(t, refDir, "a.png", fakeImagePNG)
-	r2 := writeRefImage(t, refDir, "b.png", fakeImagePNG)
-	r3 := writeRefImage(t, refDir, "c.png", fakeImagePNG)
-
-	var capturedBody string
-	imageServer := newImageServer(t, fakeImagePNG, "image/png")
-	server := startFakeAPI(t, successHandler(t, imageServer, &capturedBody), nil)
-
-	outFile := filepath.Join(t.TempDir(), "merged.png")
-	_, stderr, exitCode := runBinary(t, binPath, []string{"edit-image", r1, r2, r3, outFile}, "merge", []string{"FAL_BASE_URL=" + server.URL})
-
-	if exitCode != 0 {
-		t.Fatalf("Expected exit 0, got %d; stderr: %s", exitCode, stderr)
-	}
-	var parsed map[string]interface{}
-	if err := json.Unmarshal([]byte(capturedBody), &parsed); err != nil {
-		t.Fatalf("Failed to parse request body: %v", err)
-	}
-	urls, ok := parsed["image_urls"].([]interface{})
-	if !ok || len(urls) != 3 {
-		t.Fatalf("Expected 3 image_urls, got: %v", parsed["image_urls"])
-	}
+	t.Skip("Superseded: edit-image subcommand removed per issue #9; multi-ref handling tested by RT-4.2 under 'gen'")
 }
 
-// RT-7.6: edit-image with more than the maximum (3) reference images exits non-zero.
-// User action: runs "pix edit-image a.png b.png c.png d.png out.png".
-// User observes: error stating max ref images exceeded, non-zero exit.
 func TestEditImg_too_many_refs_RT7_6(t *testing.T) {
-	bin := buildBinary(t)
-	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
-
-	refDir := t.TempDir()
-	r1 := writeRefImage(t, refDir, "a.png", fakeImagePNG)
-	r2 := writeRefImage(t, refDir, "b.png", fakeImagePNG)
-	r3 := writeRefImage(t, refDir, "c.png", fakeImagePNG)
-	r4 := writeRefImage(t, refDir, "d.png", fakeImagePNG)
-
-	outFile := filepath.Join(t.TempDir(), "out.png")
-	_, stderr, exitCode := runBinary(t, binPath, []string{"edit-image", r1, r2, r3, r4, outFile}, "edit", nil)
-
-	if exitCode == 0 {
-		t.Errorf("Expected non-zero exit for too many refs, got 0; stderr: %s", stderr)
-	}
-	lower := strings.ToLower(stderr)
-	if !strings.Contains(lower, "maximum") && !strings.Contains(lower, "too many") {
-		t.Errorf("Expected error about exceeding max reference images, got: %q", stderr)
-	}
+	t.Skip("Superseded: edit-image subcommand removed per issue #9; max-ref handling tested by RT-4.8 under 'gen'")
 }
 
-// RT-7.7: edit-image --help prints usage that mentions reference image as required.
-// User action: runs "pix edit-image --help".
-// User observes: usage text noting that a reference image is required.
 func TestEditImg_help_text_mentions_required_ref_RT7_7(t *testing.T) {
-	bin := buildBinary(t)
-	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
-
-	_, stderr, exitCode := runBinary(t, binPath, []string{"edit-image", "--help"}, "", nil)
-
-	if exitCode != 0 {
-		t.Errorf("Expected exit 0 for --help, got %d", exitCode)
-	}
-	lower := strings.ToLower(stderr)
-	if !strings.Contains(lower, "reference image") {
-		t.Errorf("Expected --help to mention reference image, got: %q", stderr)
-	}
-	if !strings.Contains(lower, "required") {
-		t.Errorf("Expected --help to mention reference image is required, got: %q", stderr)
-	}
+	t.Skip("Superseded: edit-image subcommand removed per issue #9")
 }
 
 // --- Load-prompt mode tests (issue #8) ---
@@ -2144,7 +2007,7 @@ func TestLoadPrompt_genimg_flag_recognised_RT8_1(t *testing.T) {
 	server := startFakeAPI(t, successHandler(t, imageServer, nil), nil)
 
 	outFile := filepath.Join(t.TempDir(), "out.png")
-	_, stderr, exitCode := runBinary(t, binPath, []string{"generate-image", "--load-prompt", outFile}, "\n",
+	_, stderr, exitCode := runBinary(t, binPath, []string{"generate", "--load-prompt", outFile}, "\n",
 		ttyEnv("FAL_BASE_URL="+server.URL))
 
 	if exitCode != 0 {
@@ -2152,28 +2015,11 @@ func TestLoadPrompt_genimg_flag_recognised_RT8_1(t *testing.T) {
 	}
 }
 
-// RT-8.2: edit-image --load-prompt is a recognised flag.
+// RT-8.2: 🚫 REMOVED -- edit-image subcommand dropped per issue #9.
+// Original behaviour (edit-image accepts --load-prompt) was equivalent to RT-8.1's
+// generate-image (now 'gen') accepting --load-prompt with refs. RT-8.1 + RT-9.3 cover it.
 func TestLoadPrompt_editimg_flag_recognised_RT8_2(t *testing.T) {
-	bin := buildBinary(t)
-	promptsDir := t.TempDir()
-	writePromptFile(t, promptsDir, "p1.md", "make it grayscale")
-
-	refDir := t.TempDir()
-	refPath := writeRefImage(t, refDir, "ref.png", fakeImagePNG)
-
-	binPath := setupEnvWithConfig(t, bin, "FAL_KEY=test\n",
-		loadPromptConfigYAML("fal-ai/grok-2-aurora", promptsDir, pickFirst, false))
-
-	imageServer := newImageServer(t, fakeImagePNG, "image/png")
-	server := startFakeAPI(t, successHandler(t, imageServer, nil), nil)
-
-	outFile := filepath.Join(t.TempDir(), "out.png")
-	_, stderr, exitCode := runBinary(t, binPath, []string{"edit-image", "--load-prompt", refPath, outFile}, "\n",
-		ttyEnv("FAL_BASE_URL="+server.URL))
-
-	if exitCode != 0 {
-		t.Errorf("Expected exit 0 for --load-prompt on edit-image, got %d; stderr: %s", exitCode, stderr)
-	}
+	t.Skip("Superseded: edit-image dropped per issue #9; --load-prompt with refs now tested via 'gen' (RT-8.1 + RT-9.3)")
 }
 
 // RT-8.3: generate-image --no-load-prompt is a recognised flag.
@@ -2185,7 +2031,7 @@ func TestLoadPrompt_genimg_no_flag_recognised_RT8_3(t *testing.T) {
 	server := startFakeAPI(t, successHandler(t, imageServer, nil), nil)
 
 	outFile := filepath.Join(t.TempDir(), "out.png")
-	_, stderr, exitCode := runBinary(t, binPath, []string{"generate-image", "--no-load-prompt", outFile}, "a cat",
+	_, stderr, exitCode := runBinary(t, binPath, []string{"generate", "--no-load-prompt", outFile}, "a cat",
 		[]string{"FAL_BASE_URL=" + server.URL})
 
 	if exitCode != 0 {
@@ -2193,24 +2039,10 @@ func TestLoadPrompt_genimg_no_flag_recognised_RT8_3(t *testing.T) {
 	}
 }
 
-// RT-8.4: edit-image --no-load-prompt is a recognised flag.
+// RT-8.4: 🚫 REMOVED -- edit-image subcommand dropped per issue #9.
+// RT-8.3 covers --no-load-prompt flag recognition on 'gen'.
 func TestLoadPrompt_editimg_no_flag_recognised_RT8_4(t *testing.T) {
-	bin := buildBinary(t)
-	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
-
-	refDir := t.TempDir()
-	refPath := writeRefImage(t, refDir, "ref.png", fakeImagePNG)
-
-	imageServer := newImageServer(t, fakeImagePNG, "image/png")
-	server := startFakeAPI(t, successHandler(t, imageServer, nil), nil)
-
-	outFile := filepath.Join(t.TempDir(), "out.png")
-	_, stderr, exitCode := runBinary(t, binPath, []string{"edit-image", "--no-load-prompt", refPath, outFile}, "a cat",
-		[]string{"FAL_BASE_URL=" + server.URL})
-
-	if exitCode != 0 {
-		t.Errorf("Expected exit 0 for --no-load-prompt on edit-image, got %d; stderr: %s", exitCode, stderr)
-	}
+	t.Skip("Superseded: edit-image dropped per issue #9; --no-load-prompt tested via 'gen' in RT-8.3")
 }
 
 // RT-8.5: Candidate list passed to picker matches files in load-prompt.path.
@@ -2232,7 +2064,7 @@ func TestLoadPrompt_candidates_passed_to_picker_RT8_5(t *testing.T) {
 	server := startFakeAPI(t, successHandler(t, imageServer, nil), nil)
 
 	outFile := filepath.Join(t.TempDir(), "out.png")
-	runBinary(t, binPath, []string{"generate-image", "--load-prompt", outFile}, "\n",
+	runBinary(t, binPath, []string{"generate", "--load-prompt", outFile}, "\n",
 		ttyEnv("FAL_BASE_URL="+server.URL))
 
 	data, err := os.ReadFile(candidatesLog)
@@ -2261,7 +2093,7 @@ func TestLoadPrompt_selected_becomes_prompt_RT8_6(t *testing.T) {
 	server := startFakeAPI(t, successHandler(t, imageServer, &capturedBody), nil)
 
 	outFile := filepath.Join(t.TempDir(), "out.png")
-	runBinary(t, binPath, []string{"generate-image", "--load-prompt", outFile}, "\n",
+	runBinary(t, binPath, []string{"generate", "--load-prompt", outFile}, "\n",
 		ttyEnv("FAL_BASE_URL="+server.URL))
 
 	var parsed map[string]interface{}
@@ -2289,7 +2121,7 @@ func TestLoadPrompt_picker_cancel_exits_zero_RT8_7(t *testing.T) {
 	}, nil)
 
 	outFile := filepath.Join(t.TempDir(), "out.png")
-	_, _, exitCode := runBinary(t, binPath, []string{"generate-image", "--load-prompt", outFile}, "\n",
+	_, _, exitCode := runBinary(t, binPath, []string{"generate", "--load-prompt", outFile}, "\n",
 		ttyEnv("FAL_BASE_URL="+server.URL))
 
 	if exitCode != 0 {
@@ -2303,47 +2135,18 @@ func TestLoadPrompt_picker_cancel_exits_zero_RT8_7(t *testing.T) {
 	}
 }
 
-// RT-8.8: Piped non-empty stdin + --load-prompt exits non-zero.
+// RT-8.8: 🚫 REMOVED (superseded by RT-8.32 / AC8.17).
+// Original behaviour: piped non-empty stdin + --load-prompt exits non-zero.
+// New behaviour: piped non-empty stdin overrides load-prompt mode and is used as the prompt.
 func TestLoadPrompt_piped_stdin_errors_RT8_8(t *testing.T) {
-	bin := buildBinary(t)
-	promptsDir := t.TempDir()
-	writePromptFile(t, promptsDir, "p1.md", "x")
-
-	binPath := setupEnvWithConfig(t, bin, "FAL_KEY=test\n",
-		loadPromptConfigYAML("fal-ai/grok-2-aurora", promptsDir, pickFirst, false))
-
-	// No PIX_TEST_TTY env -> stdin treated as non-TTY pipe.
-	outFile := filepath.Join(t.TempDir(), "out.png")
-	_, stderr, exitCode := runBinary(t, binPath, []string{"generate-image", "--load-prompt", outFile}, "piped content", nil)
-
-	if exitCode == 0 {
-		t.Errorf("Expected non-zero exit for piped stdin + --load-prompt; stderr: %s", stderr)
-	}
-	lower := strings.ToLower(stderr)
-	if !strings.Contains(lower, "terminal") && !strings.Contains(lower, "tty") && !strings.Contains(lower, "interactive") {
-		t.Errorf("Expected TTY-required error, got: %q", stderr)
-	}
+	t.Skip("Superseded by RT-8.32 (AC8.17) -- piped stdin now overrides load-prompt mode rather than erroring")
 }
 
-// RT-8.9: Piped empty stdin + --load-prompt exits non-zero.
+// RT-8.9: 🚫 REMOVED (superseded by RT-8.34 / AC8.17).
+// Original behaviour: piped empty stdin + --load-prompt exits non-zero with TTY-required error.
+// New behaviour: piped empty stdin + load-prompt still errors, but with the standard "no prompt provided" message.
 func TestLoadPrompt_piped_empty_stdin_errors_RT8_9(t *testing.T) {
-	bin := buildBinary(t)
-	promptsDir := t.TempDir()
-	writePromptFile(t, promptsDir, "p1.md", "x")
-
-	binPath := setupEnvWithConfig(t, bin, "FAL_KEY=test\n",
-		loadPromptConfigYAML("fal-ai/grok-2-aurora", promptsDir, pickFirst, false))
-
-	outFile := filepath.Join(t.TempDir(), "out.png")
-	_, stderr, exitCode := runBinary(t, binPath, []string{"generate-image", "--load-prompt", outFile}, "", nil)
-
-	if exitCode == 0 {
-		t.Errorf("Expected non-zero exit for empty piped stdin + --load-prompt; stderr: %s", stderr)
-	}
-	lower := strings.ToLower(stderr)
-	if !strings.Contains(lower, "terminal") && !strings.Contains(lower, "tty") && !strings.Contains(lower, "interactive") {
-		t.Errorf("Expected TTY-required error, got: %q", stderr)
-	}
+	t.Skip("Superseded by RT-8.34 (AC8.17) -- empty piped stdin still errors but with the standard no-prompt message")
 }
 
 // RT-8.10: --load-prompt with no load-prompt section in config exits non-zero.
@@ -2352,7 +2155,7 @@ func TestLoadPrompt_no_section_errors_RT8_10(t *testing.T) {
 	binPath := setupEnvWithConfig(t, bin, "FAL_KEY=test\n", "model: fal-ai/grok-2-aurora\n")
 
 	outFile := filepath.Join(t.TempDir(), "out.png")
-	_, stderr, exitCode := runBinary(t, binPath, []string{"generate-image", "--load-prompt", outFile}, "\n",
+	_, stderr, exitCode := runBinary(t, binPath, []string{"generate", "--load-prompt", outFile}, "\n",
 		ttyEnv())
 
 	if exitCode == 0 {
@@ -2371,7 +2174,7 @@ func TestLoadPrompt_empty_path_errors_RT8_11(t *testing.T) {
 	binPath := setupEnvWithConfig(t, bin, "FAL_KEY=test\n", cfg)
 
 	outFile := filepath.Join(t.TempDir(), "out.png")
-	_, stderr, exitCode := runBinary(t, binPath, []string{"generate-image", "--load-prompt", outFile}, "\n",
+	_, stderr, exitCode := runBinary(t, binPath, []string{"generate", "--load-prompt", outFile}, "\n",
 		ttyEnv())
 
 	if exitCode == 0 {
@@ -2389,7 +2192,7 @@ func TestLoadPrompt_picker_missing_errors_RT8_12(t *testing.T) {
 		loadPromptConfigYAML("fal-ai/grok-2-aurora", promptsDir, "/nonexistent/binary-xyzzy", false))
 
 	outFile := filepath.Join(t.TempDir(), "out.png")
-	_, stderr, exitCode := runBinary(t, binPath, []string{"generate-image", "--load-prompt", outFile}, "\n",
+	_, stderr, exitCode := runBinary(t, binPath, []string{"generate", "--load-prompt", outFile}, "\n",
 		ttyEnv())
 
 	if exitCode == 0 {
@@ -2407,7 +2210,7 @@ func TestLoadPrompt_nonexistent_dir_errors_RT8_13(t *testing.T) {
 		loadPromptConfigYAML("fal-ai/grok-2-aurora", "/nonexistent/dir-xyzzy", pickFirst, false))
 
 	outFile := filepath.Join(t.TempDir(), "out.png")
-	_, stderr, exitCode := runBinary(t, binPath, []string{"generate-image", "--load-prompt", outFile}, "\n",
+	_, stderr, exitCode := runBinary(t, binPath, []string{"generate", "--load-prompt", outFile}, "\n",
 		ttyEnv())
 
 	if exitCode == 0 {
@@ -2423,7 +2226,7 @@ func TestLoadPrompt_empty_dir_errors_RT8_14(t *testing.T) {
 		loadPromptConfigYAML("fal-ai/grok-2-aurora", emptyDir, pickFirst, false))
 
 	outFile := filepath.Join(t.TempDir(), "out.png")
-	_, stderr, exitCode := runBinary(t, binPath, []string{"generate-image", "--load-prompt", outFile}, "\n",
+	_, stderr, exitCode := runBinary(t, binPath, []string{"generate", "--load-prompt", outFile}, "\n",
 		ttyEnv())
 
 	if exitCode == 0 {
@@ -2448,7 +2251,7 @@ func TestLoadPrompt_selection_displayed_on_stderr_RT8_15(t *testing.T) {
 	server := startFakeAPI(t, successHandler(t, imageServer, nil), nil)
 
 	outFile := filepath.Join(t.TempDir(), "out.png")
-	_, stderr, _ := runBinary(t, binPath, []string{"generate-image", "--load-prompt", outFile}, "\n",
+	_, stderr, _ := runBinary(t, binPath, []string{"generate", "--load-prompt", outFile}, "\n",
 		ttyEnv("FAL_BASE_URL="+server.URL))
 
 	if !strings.Contains(stderr, "MAGIC-MARKER-12345") {
@@ -2471,7 +2274,7 @@ func TestLoadPrompt_reads_one_line_RT8_16(t *testing.T) {
 
 	outFile := filepath.Join(t.TempDir(), "out.png")
 	// Stdin has two lines; only first should be read as additional text.
-	runBinary(t, binPath, []string{"generate-image", "--load-prompt", outFile},
+	runBinary(t, binPath, []string{"generate", "--load-prompt", outFile},
 		"first line addition\nsecond line should be ignored\n",
 		ttyEnv("FAL_BASE_URL="+server.URL))
 
@@ -2502,7 +2305,7 @@ func TestLoadPrompt_quiet_suppresses_display_RT8_17(t *testing.T) {
 	server := startFakeAPI(t, successHandler(t, imageServer, &capturedBody), nil)
 
 	outFile := filepath.Join(t.TempDir(), "out.png")
-	_, stderr, _ := runBinary(t, binPath, []string{"--quiet", "generate-image", "--load-prompt", outFile},
+	_, stderr, _ := runBinary(t, binPath, []string{"--quiet", "generate", "--load-prompt", outFile},
 		"appended\n", ttyEnv("FAL_BASE_URL="+server.URL))
 
 	// Display of prompt suppressed under --quiet
@@ -2534,7 +2337,7 @@ func TestLoadPrompt_join_with_double_newline_RT8_18(t *testing.T) {
 	server := startFakeAPI(t, successHandler(t, imageServer, &capturedBody), nil)
 
 	outFile := filepath.Join(t.TempDir(), "out.png")
-	runBinary(t, binPath, []string{"generate-image", "--load-prompt", outFile},
+	runBinary(t, binPath, []string{"generate", "--load-prompt", outFile},
 		"with extra detail\n", ttyEnv("FAL_BASE_URL="+server.URL))
 
 	var parsed map[string]interface{}
@@ -2562,7 +2365,7 @@ func TestLoadPrompt_empty_addition_no_trailing_RT8_19(t *testing.T) {
 	server := startFakeAPI(t, successHandler(t, imageServer, &capturedBody), nil)
 
 	outFile := filepath.Join(t.TempDir(), "out.png")
-	runBinary(t, binPath, []string{"generate-image", "--load-prompt", outFile},
+	runBinary(t, binPath, []string{"generate", "--load-prompt", outFile},
 		"\n", ttyEnv("FAL_BASE_URL="+server.URL))
 
 	var parsed map[string]interface{}
@@ -2589,7 +2392,7 @@ func TestLoadPrompt_whitespace_addition_no_trailing_RT8_20(t *testing.T) {
 	server := startFakeAPI(t, successHandler(t, imageServer, &capturedBody), nil)
 
 	outFile := filepath.Join(t.TempDir(), "out.png")
-	runBinary(t, binPath, []string{"generate-image", "--load-prompt", outFile},
+	runBinary(t, binPath, []string{"generate", "--load-prompt", outFile},
 		"   \t  \n", ttyEnv("FAL_BASE_URL="+server.URL))
 
 	var parsed map[string]interface{}
@@ -2615,7 +2418,7 @@ func TestLoadPrompt_config_parses_RT8_21(t *testing.T) {
 	server := startFakeAPI(t, successHandler(t, imageServer, nil), nil)
 
 	outFile := filepath.Join(t.TempDir(), "out.png")
-	_, stderr, exitCode := runBinary(t, binPath, []string{"generate-image", outFile}, "\n",
+	_, stderr, exitCode := runBinary(t, binPath, []string{"generate", outFile}, "\n",
 		ttyEnv("FAL_BASE_URL="+server.URL))
 
 	if exitCode != 0 {
@@ -2636,7 +2439,7 @@ func TestLoadPrompt_picker_defaults_to_fzf_RT8_22(t *testing.T) {
 
 	outFile := filepath.Join(t.TempDir(), "out.png")
 	_, stderr, exitCode := runBinary(t, binPath,
-		[]string{"generate-image", "--load-prompt", outFile}, "\n",
+		[]string{"generate", "--load-prompt", outFile}, "\n",
 		ttyEnv("PATH=/nonexistent-only-path"))
 
 	if exitCode == 0 {
@@ -2663,7 +2466,7 @@ func TestLoadPrompt_always_defaults_false_RT8_23(t *testing.T) {
 	server := startFakeAPI(t, successHandler(t, imageServer, &capturedBody), nil)
 
 	outFile := filepath.Join(t.TempDir(), "out.png")
-	runBinary(t, binPath, []string{"generate-image", outFile}, "user typed prompt",
+	runBinary(t, binPath, []string{"generate", outFile}, "user typed prompt",
 		[]string{"FAL_BASE_URL=" + server.URL})
 
 	var parsed map[string]interface{}
@@ -2690,7 +2493,7 @@ func TestLoadPrompt_always_triggers_genimg_RT8_24(t *testing.T) {
 	server := startFakeAPI(t, successHandler(t, imageServer, &capturedBody), nil)
 
 	outFile := filepath.Join(t.TempDir(), "out.png")
-	runBinary(t, binPath, []string{"generate-image", outFile}, "\n",
+	runBinary(t, binPath, []string{"generate", outFile}, "\n",
 		ttyEnv("FAL_BASE_URL="+server.URL))
 
 	var parsed map[string]interface{}
@@ -2703,34 +2506,10 @@ func TestLoadPrompt_always_triggers_genimg_RT8_24(t *testing.T) {
 	}
 }
 
-// RT-8.25: edit-image with always=true triggers picker even without flag.
+// RT-8.25: 🚫 REMOVED -- edit-image dropped per issue #9. RT-8.24 covers the
+// always:true trigger; ref-image handling under 'gen' is in RT-9.3.
 func TestLoadPrompt_always_triggers_editimg_RT8_25(t *testing.T) {
-	bin := buildBinary(t)
-	promptsDir := t.TempDir()
-	writePromptFile(t, promptsDir, "saved.md", "edit prompt body")
-
-	refDir := t.TempDir()
-	refPath := writeRefImage(t, refDir, "ref.png", fakeImagePNG)
-
-	binPath := setupEnvWithConfig(t, bin, "FAL_KEY=test\n",
-		loadPromptConfigYAML("fal-ai/grok-2-aurora", promptsDir, pickFirst, true))
-
-	var capturedBody string
-	imageServer := newImageServer(t, fakeImagePNG, "image/png")
-	server := startFakeAPI(t, successHandler(t, imageServer, &capturedBody), nil)
-
-	outFile := filepath.Join(t.TempDir(), "out.png")
-	runBinary(t, binPath, []string{"edit-image", refPath, outFile}, "\n",
-		ttyEnv("FAL_BASE_URL="+server.URL))
-
-	var parsed map[string]interface{}
-	if err := json.Unmarshal([]byte(capturedBody), &parsed); err != nil {
-		t.Fatalf("Failed to parse: %v", err)
-	}
-	got, _ := parsed["prompt"].(string)
-	if got != "edit prompt body" {
-		t.Errorf("Expected always:true to trigger picker on edit-image; prompt was: %q", got)
-	}
+	t.Skip("Superseded: edit-image dropped per issue #9; always:true coverage in RT-8.24, refs under 'gen' in RT-9.3")
 }
 
 // RT-8.26: always:true + --no-load-prompt skips picker; stdin read directly.
@@ -2747,7 +2526,7 @@ func TestLoadPrompt_no_flag_overrides_always_RT8_26(t *testing.T) {
 	server := startFakeAPI(t, successHandler(t, imageServer, &capturedBody), nil)
 
 	outFile := filepath.Join(t.TempDir(), "out.png")
-	runBinary(t, binPath, []string{"generate-image", "--no-load-prompt", outFile},
+	runBinary(t, binPath, []string{"generate", "--no-load-prompt", outFile},
 		"typed by user", []string{"FAL_BASE_URL=" + server.URL})
 
 	var parsed map[string]interface{}
@@ -2776,7 +2555,7 @@ func TestLoadPrompt_dry_run_no_api_call_RT8_27(t *testing.T) {
 
 	outFile := filepath.Join(t.TempDir(), "out.png")
 	_, _, exitCode := runBinary(t, binPath,
-		[]string{"generate-image", "--load-prompt", "--dry-run", outFile}, "\n",
+		[]string{"generate", "--load-prompt", "--dry-run", outFile}, "\n",
 		ttyEnv("FAL_BASE_URL="+server.URL))
 
 	if exitCode != 0 {
@@ -2806,7 +2585,7 @@ func TestLoadPrompt_tilde_in_path_RT8_29(t *testing.T) {
 	server := startFakeAPI(t, successHandler(t, imageServer, &capturedBody), nil)
 
 	outFile := filepath.Join(t.TempDir(), "out.png")
-	_, stderr, exitCode := runBinary(t, binPath, []string{"generate-image", "--load-prompt", outFile}, "\n",
+	_, stderr, exitCode := runBinary(t, binPath, []string{"generate", "--load-prompt", outFile}, "\n",
 		[]string{"HOME=" + fakeHome, "FAL_BASE_URL=" + server.URL, "PIX_TEST_TTY=1"})
 
 	if exitCode != 0 {
@@ -2846,11 +2625,98 @@ func TestLoadPrompt_tilde_in_picker_RT8_30(t *testing.T) {
 	server := startFakeAPI(t, successHandler(t, imageServer, nil), nil)
 
 	outFile := filepath.Join(t.TempDir(), "out.png")
-	_, stderr, exitCode := runBinary(t, binPath, []string{"generate-image", "--load-prompt", outFile}, "\n",
+	_, stderr, exitCode := runBinary(t, binPath, []string{"generate", "--load-prompt", outFile}, "\n",
 		[]string{"HOME=" + fakeHome, "FAL_BASE_URL=" + server.URL, "PIX_TEST_TTY=1"})
 
 	if exitCode != 0 {
 		t.Errorf("Expected exit 0 with tilde-expanded picker, got %d; stderr: %s", exitCode, stderr)
+	}
+}
+
+// RT-8.32: Piped non-empty stdin + --load-prompt uses stdin as prompt, picker skipped.
+// User action: `echo "a red cat" | pix --load-prompt generate-image out.png`.
+// User observes: image generated from piped prompt; picker never invoked.
+func TestLoadPrompt_piped_stdin_overrides_flag_RT8_32(t *testing.T) {
+	bin := buildBinary(t)
+	promptsDir := t.TempDir()
+	writePromptFile(t, promptsDir, "saved.md", "saved-prompt-should-not-be-used")
+
+	binPath := setupEnvWithConfig(t, bin, "FAL_KEY=test\n",
+		loadPromptConfigYAML("fal-ai/grok-2-aurora", promptsDir, pickFirst, false))
+
+	var capturedBody string
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPI(t, successHandler(t, imageServer, &capturedBody), nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	// No PIX_TEST_TTY -> stdin treated as piped non-TTY.
+	_, stderr, exitCode := runBinary(t, binPath, []string{"generate", "--load-prompt", outFile},
+		"piped prompt wins", []string{"FAL_BASE_URL=" + server.URL})
+
+	if exitCode != 0 {
+		t.Fatalf("Expected exit 0 with piped stdin overriding --load-prompt, got %d; stderr: %s", exitCode, stderr)
+	}
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(capturedBody), &parsed); err != nil {
+		t.Fatalf("Failed to parse: %v", err)
+	}
+	got, _ := parsed["prompt"].(string)
+	if got != "piped prompt wins" {
+		t.Errorf("Expected piped stdin to be used as prompt, got: %q", got)
+	}
+}
+
+// RT-8.33: Piped non-empty stdin + load-prompt.always:true uses stdin as prompt.
+// User action: `echo "a red cat" | pix generate-image out.png` with always:true in config.
+// User observes: image generated from piped prompt; picker never invoked.
+func TestLoadPrompt_piped_stdin_overrides_always_RT8_33(t *testing.T) {
+	bin := buildBinary(t)
+	promptsDir := t.TempDir()
+	writePromptFile(t, promptsDir, "saved.md", "saved-prompt-should-not-be-used")
+
+	binPath := setupEnvWithConfig(t, bin, "FAL_KEY=test\n",
+		loadPromptConfigYAML("fal-ai/grok-2-aurora", promptsDir, pickFirst, true))
+
+	var capturedBody string
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPI(t, successHandler(t, imageServer, &capturedBody), nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	_, stderr, exitCode := runBinary(t, binPath, []string{"generate", outFile},
+		"piped overrides always", []string{"FAL_BASE_URL=" + server.URL})
+
+	if exitCode != 0 {
+		t.Fatalf("Expected exit 0 with piped stdin overriding always:true, got %d; stderr: %s", exitCode, stderr)
+	}
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(capturedBody), &parsed); err != nil {
+		t.Fatalf("Failed to parse: %v", err)
+	}
+	got, _ := parsed["prompt"].(string)
+	if got != "piped overrides always" {
+		t.Errorf("Expected piped stdin to be used as prompt, got: %q", got)
+	}
+}
+
+// RT-8.34: Piped empty/whitespace-only stdin + load-prompt mode exits non-zero.
+// User action: `: | pix --load-prompt generate-image out.png` (empty pipe).
+// User observes: error indicating no prompt provided.
+func TestLoadPrompt_piped_empty_stdin_errors_RT8_34(t *testing.T) {
+	bin := buildBinary(t)
+	promptsDir := t.TempDir()
+	writePromptFile(t, promptsDir, "p1.md", "x")
+
+	binPath := setupEnvWithConfig(t, bin, "FAL_KEY=test\n",
+		loadPromptConfigYAML("fal-ai/grok-2-aurora", promptsDir, pickFirst, false))
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	_, stderr, exitCode := runBinary(t, binPath, []string{"generate", "--load-prompt", outFile}, "", nil)
+
+	if exitCode == 0 {
+		t.Errorf("Expected non-zero exit for empty piped stdin + --load-prompt; stderr: %s", stderr)
+	}
+	if !strings.Contains(strings.ToLower(stderr), "no prompt") {
+		t.Errorf("Expected 'no prompt' error, got: %q", stderr)
 	}
 }
 
@@ -2881,7 +2747,7 @@ func TestAPIKeys_tilde_in_file_RT8_31(t *testing.T) {
 	}, nil)
 
 	outFile := filepath.Join(t.TempDir(), "out.png")
-	_, stderr, exitCode := runBinary(t, binPath, []string{"generate-image", outFile}, "a cat",
+	_, stderr, exitCode := runBinary(t, binPath, []string{"generate", outFile}, "a cat",
 		[]string{"HOME=" + fakeHome, "FAL_BASE_URL=" + server.URL})
 
 	if exitCode != 0 {
@@ -2905,7 +2771,7 @@ func TestLoadPrompt_dry_run_shows_joined_prompt_RT8_28(t *testing.T) {
 
 	outFile := filepath.Join(t.TempDir(), "out.png")
 	_, stderr, _ := runBinary(t, binPath,
-		[]string{"generate-image", "--load-prompt", "--dry-run", outFile},
+		[]string{"generate", "--load-prompt", "--dry-run", outFile},
 		"extra part\n", ttyEnv("FAL_BASE_URL="+server.URL))
 
 	if !strings.Contains(stderr, "saved part") {
@@ -2913,5 +2779,146 @@ func TestLoadPrompt_dry_run_shows_joined_prompt_RT8_28(t *testing.T) {
 	}
 	if !strings.Contains(stderr, "extra part") {
 		t.Errorf("Expected dry-run preview to contain additional part of prompt; got: %q", stderr)
+	}
+}
+
+// --- Subcommand rename tests (issue #9) ---
+
+// RT-9.1: pix generate dispatches successfully with stdin prompt and output positional.
+func TestRename_generate_dispatches_RT9_1(t *testing.T) {
+	bin := buildBinary(t)
+	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
+
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPI(t, successHandler(t, imageServer, nil), nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	_, stderr, exitCode := runBinary(t, binPath, []string{"generate", outFile}, "a cat",
+		[]string{"FAL_BASE_URL=" + server.URL})
+
+	if exitCode != 0 {
+		t.Errorf("Expected exit 0 for 'pix generate', got %d; stderr: %s", exitCode, stderr)
+	}
+	if _, err := os.Stat(outFile); err != nil {
+		t.Errorf("Expected output file from 'pix generate', got: %v", err)
+	}
+}
+
+// RT-9.2: pix gen dispatches successfully (alias of generate).
+func TestRename_gen_alias_RT9_2(t *testing.T) {
+	bin := buildBinary(t)
+	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
+
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPI(t, successHandler(t, imageServer, nil), nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	_, stderr, exitCode := runBinary(t, binPath, []string{"gen", outFile}, "a cat",
+		[]string{"FAL_BASE_URL=" + server.URL})
+
+	if exitCode != 0 {
+		t.Errorf("Expected exit 0 for 'pix gen', got %d; stderr: %s", exitCode, stderr)
+	}
+	if _, err := os.Stat(outFile); err != nil {
+		t.Errorf("Expected output file from 'pix gen', got: %v", err)
+	}
+}
+
+// RT-9.3: pix gen ref.png out.png calls FAL /edit endpoint with the ref.
+func TestRename_gen_with_ref_calls_edit_RT9_3(t *testing.T) {
+	bin := buildBinary(t)
+	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
+
+	refDir := t.TempDir()
+	refPath := writeRefImage(t, refDir, "ref.png", fakeImagePNG)
+
+	var capturedPath string
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPI(t, func(w http.ResponseWriter, r *http.Request) {
+		capturedPath = r.URL.Path
+		resp := map[string]interface{}{
+			"images": []map[string]interface{}{{"url": imageServer.URL + "/img.png"}},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}, nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	runBinary(t, binPath, []string{"gen", refPath, outFile}, "edit", []string{"FAL_BASE_URL=" + server.URL})
+
+	if !strings.HasSuffix(capturedPath, "/edit") {
+		t.Errorf("Expected /edit endpoint for ref input under 'gen', got: %q", capturedPath)
+	}
+}
+
+// RT-9.4: pix gen with no refs calls the text-to-image endpoint (no /edit suffix).
+func TestRename_gen_no_refs_text_endpoint_RT9_4(t *testing.T) {
+	bin := buildBinary(t)
+	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
+
+	var capturedPath string
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPI(t, func(w http.ResponseWriter, r *http.Request) {
+		capturedPath = r.URL.Path
+		resp := map[string]interface{}{
+			"images": []map[string]interface{}{{"url": imageServer.URL + "/img.png"}},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}, nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	runBinary(t, binPath, []string{"gen", outFile}, "a cat", []string{"FAL_BASE_URL=" + server.URL})
+
+	if strings.HasSuffix(capturedPath, "/edit") {
+		t.Errorf("Expected text-to-image endpoint without /edit suffix for no-ref 'gen', got: %q", capturedPath)
+	}
+}
+
+// RT-9.5: pix gen-img is no longer recognised; exits non-zero.
+func TestRename_gen_img_dropped_RT9_5(t *testing.T) {
+	bin := buildBinary(t)
+	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
+
+	_, stderr, exitCode := runBinary(t, binPath, []string{"gen-img", "out.png"}, "a cat", nil)
+
+	if exitCode == 0 {
+		t.Errorf("Expected non-zero exit for dropped 'gen-img', got 0; stderr: %s", stderr)
+	}
+	if !strings.Contains(strings.ToLower(stderr), "unknown subcommand") {
+		t.Errorf("Expected unknown-subcommand error, got: %q", stderr)
+	}
+}
+
+// RT-9.6: pix generate-image is no longer recognised; exits non-zero.
+func TestRename_generate_image_dropped_RT9_6(t *testing.T) {
+	bin := buildBinary(t)
+	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
+
+	_, stderr, exitCode := runBinary(t, binPath, []string{"generate-image", "out.png"}, "a cat", nil)
+
+	if exitCode == 0 {
+		t.Errorf("Expected non-zero exit for dropped 'generate-image', got 0; stderr: %s", stderr)
+	}
+	if !strings.Contains(strings.ToLower(stderr), "unknown subcommand") {
+		t.Errorf("Expected unknown-subcommand error, got: %q", stderr)
+	}
+}
+
+// RT-9.7: pix edit-image is no longer recognised; exits non-zero.
+func TestRename_edit_image_dropped_RT9_7(t *testing.T) {
+	bin := buildBinary(t)
+	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
+
+	refDir := t.TempDir()
+	refPath := writeRefImage(t, refDir, "ref.png", fakeImagePNG)
+
+	_, stderr, exitCode := runBinary(t, binPath, []string{"edit-image", refPath, "out.png"}, "edit", nil)
+
+	if exitCode == 0 {
+		t.Errorf("Expected non-zero exit for dropped 'edit-image', got 0; stderr: %s", stderr)
+	}
+	if !strings.Contains(strings.ToLower(stderr), "unknown subcommand") {
+		t.Errorf("Expected unknown-subcommand error, got: %q", stderr)
 	}
 }

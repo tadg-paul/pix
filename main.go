@@ -1,5 +1,5 @@
 // ABOUTME: pix CLI entry point.
-// ABOUTME: Parses global flags, dispatches to subcommand handlers (generate-image, edit-image, cost).
+// ABOUTME: Parses global flags, dispatches to subcommand handlers (generate, cost).
 
 package main
 
@@ -21,11 +21,10 @@ func printUsage() {
 	fmt.Fprintln(os.Stderr, "A minimal CLI for generating images via the FAL API.")
 	fmt.Fprintln(os.Stderr, "")
 	fmt.Fprintln(os.Stderr, "Subcommands:")
-	fmt.Fprintln(os.Stderr, "  generate-image   Generate an image from a text prompt (stdin)")
-	fmt.Fprintln(os.Stderr, "                   (alias: gen-img; optionally accepts reference images)")
-	fmt.Fprintln(os.Stderr, "  edit-image       Edit one or more existing images using a text prompt")
-	fmt.Fprintln(os.Stderr, "                   (requires at least one reference image)")
-	fmt.Fprintln(os.Stderr, "  cost             Query pricing for the configured model")
+	fmt.Fprintln(os.Stderr, "  generate   Generate an image from a text prompt (stdin)")
+	fmt.Fprintln(os.Stderr, "             Accepts optional reference images as earlier positionals (max 3).")
+	fmt.Fprintln(os.Stderr, "             Alias: gen")
+	fmt.Fprintln(os.Stderr, "  cost       Query pricing for the configured model")
 	fmt.Fprintln(os.Stderr, "")
 	fmt.Fprintln(os.Stderr, "Global flags (placed before the subcommand):")
 	fmt.Fprintln(os.Stderr, "  -h, --help       Show this help message")
@@ -103,12 +102,8 @@ func run() int {
 	subcommandArgs := args[subcommandIdx+1:]
 
 	switch subcommand {
-	case "generate-image":
-		return runGenImg(subcommandArgs, quiet, "generate-image")
-	case "gen-img":
-		return runGenImg(subcommandArgs, quiet, "gen-img")
-	case "edit-image":
-		return runGenImg(subcommandArgs, quiet, "edit-image")
+	case "generate", "gen":
+		return runGenImg(subcommandArgs, quiet, subcommand)
 	case "cost":
 		return runCost(subcommandArgs, quiet)
 	default:

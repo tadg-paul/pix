@@ -24,19 +24,19 @@ This compiles the binary to `~/.local/bin/pix` and creates `~/.config/pix/config
 
 ### Usage
 
-Create a new image from a prompt:
+Generate a new image from a prompt:
 
 ```bash
-> echo "a red cat sitting on a wall" | pix generate-image cat
+> echo "a red cat sitting on a wall" | pix gen cat
 Cost: $0.02 (unit: images) for model xai/grok-imagine-image (source: FAL API)
 Wrote cat.jpg
 
-> echo "a blueprint" | pix generate-image blueprint.png
+> echo "a blueprint" | pix gen blueprint.png
 # API returns JPEG, converted to PNG via magick:
 Cost: $0.02 (unit: images) for model xai/grok-imagine-image (source: FAL API)
 Wrote blueprint.png (converted jpg to png)
 
-> echo "test prompt" | pix generate-image --dry-run test
+> echo "test prompt" | pix gen --dry-run test
 POST https://fal.run/xai/grok-imagine-image
 {
   "prompt": "test prompt"
@@ -44,26 +44,22 @@ POST https://fal.run/xai/grok-imagine-image
 Output: test
 (dry run -- no API call made)
 
-> echo "A spoon eating a man wearing a hat" | pix --quiet generate-image -p landscape
+> echo "A spoon eating a man wearing a hat" | pix --quiet gen -p landscape
 # generates quietly, opens in default viewer (or preview-command from config)
 ```
 
-Edit an existing image (or merge several) with `edit-image`:
+Earlier positionals that exist as image files become reference images (max 3) -- pix sends them to the FAL edit endpoint:
 
 ```bash
-> echo "make it dramatic" | pix edit-image photo.jpg dramatic.jpg
+> echo "make the sky purple" | pix gen photo.jpg edited.jpg
 ⚠️  Using photo.jpg as reference image (will be sent to FAL)
 Cost: $0.02 (unit: images) for model xai/grok-imagine-image (source: FAL API)
-Wrote dramatic.jpg
+Wrote edited.jpg
 
-> echo "merge these" | pix edit-image a.jpg b.jpg merged.jpg
+> echo "merge these" | pix gen a.jpg b.jpg merged.jpg
 ⚠️  Using a.jpg as reference image (will be sent to FAL)
 ⚠️  Using b.jpg as reference image (will be sent to FAL)
 Wrote merged.jpg
-
-> pix edit-image out.png
-Error: edit-image requires at least one reference image
-       (the last positional is the output file; earlier positionals are reference images)
 ```
 
 Look up cost without generating:
@@ -75,14 +71,11 @@ Unit price: $0.02 per images (source: FAL API)
 Estimated cost: $0.0200 per call based on usage history (source: FAL API)
 ```
 
-> **Note:** `generate-image` will *also* accept reference images if earlier positionals exist as image files -- those positionals are sent to the FAL edit endpoint just as `edit-image` does. The two subcommands share the same pipeline; `edit-image` simply enforces that at least one reference is supplied.
-
 ### Subcommands
 
 | Subcommand | Description |
 |------------|-------------|
-| `generate-image <output>` | Generate a new image from a prompt on stdin. Will also accept up to 3 reference images as earlier positionals if those files exist (in which case it edits rather than generates). Alias: `gen-img`. |
-| `edit-image <refs...> <output>` | Edit one or more existing images using a prompt on stdin. At least one reference image is required (max 3). The last positional is the target. |
+| `generate [refs...] <output>` | Generate an image from a prompt on stdin. Earlier positionals that exist as image files become reference images (max 3) and pix uses the FAL edit endpoint. Alias: `gen`. |
 | `cost` | Query pricing for the configured model (no generation) |
 
 Run `pix <subcommand> --help` for subcommand-specific usage.
@@ -101,10 +94,10 @@ Run `pix <subcommand> --help` for subcommand-specific usage.
 
 | Flag | Subcommand | Description |
 |------|------------|-------------|
-| `--dry-run` | generate-image, edit-image, cost | Show what would happen without calling the API |
-| `-p`, `--preview` | generate-image, edit-image | Open the image after generation |
-| `--load-prompt` | generate-image, edit-image | Pick a saved prompt via fzf (or configured picker); requires a TTY |
-| `--no-load-prompt` | generate-image, edit-image | Disable load-prompt mode (overrides `load-prompt.always`) |
+| `--dry-run` | generate, cost | Show what would happen without calling the API |
+| `-p`, `--preview` | generate | Open the image after generation |
+| `--load-prompt` | generate | Pick a saved prompt via fzf (or configured picker) |
+| `--no-load-prompt` | generate | Disable load-prompt mode (overrides `load-prompt.always`) |
 
 `--help` is mutually exclusive with all other flags and arguments.
 
@@ -142,7 +135,7 @@ api-keys:
 2. Displays it on stderr.
 3. Reads one line from stdin -- Enter sends as-is, any text becomes a suffix joined by a blank line.
 
-Cancelling the picker exits 0 without contacting FAL. The flag requires an interactive terminal; combining it with piped stdin is an error. Set `load-prompt.always: true` to make the flow implicit, with `--no-load-prompt` available per invocation when you want to type a prompt directly.
+Cancelling the picker exits 0 without contacting FAL. When stdin is piped with content, pix uses the piped content as the prompt directly and skips the picker -- so `echo "..." | pix gen out.png` works whether or not `--load-prompt` is in play. Set `load-prompt.always: true` to make the flow implicit, with `--no-load-prompt` available per invocation when you want to type a prompt directly.
 
 ### API key resolution priority
 
@@ -167,7 +160,7 @@ If no file extension is provided, the API response format is used (typically `.j
 | File | Purpose |
 |------|---------|
 | `main.go` | CLI entry point and subcommand dispatch |
-| `genimg.go` | gen-img subcommand handler |
+| `genimg.go` | `generate` subcommand handler (alias `gen`) |
 | `cost.go` | cost subcommand handler |
 | `config.go` | Config loading and API key resolution |
 | `fal.go` | FAL API HTTP client helpers |

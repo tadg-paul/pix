@@ -1,4 +1,4 @@
-<!-- Version: 0.4 | Last updated: 2026-05-12 -->
+<!-- Version: 0.5 | Last updated: 2026-05-12 -->
 
 # Architecture
 
@@ -15,9 +15,9 @@ stdin (prompt)─────►│                │─► FAL API ─► imag
 config.yaml ───────►│                │─► preview command ─► image viewer
                     └────────────────┘
                           │
-                    ┌─────┴─────┬─────────────┐
-                    │           │             │
-            generate-image  edit-image       cost
+                    ┌─────┴─────┐
+                    │           │
+                generate       cost
 ```
 
 ### File layout
@@ -27,7 +27,7 @@ All code lives in package `main` at the project root.
 | File | Purpose |
 |------|---------|
 | `main.go` | Entry point, global flag parsing, subcommand dispatch |
-| `genimg.go` | `pix generate-image` and `pix edit-image` handler (alias `gen-img`) -- generates or edits images from prompts |
+| `genimg.go` | `pix generate` handler (alias `gen`) -- generates or edits images from prompts |
 | `cost.go` | `pix cost` handler -- queries pricing without generation |
 | `config.go` | `config.yaml` loading, API key resolution, config directory resolution |
 | `fal.go` | FAL API HTTP helpers (generation, pricing, historical estimate) |
@@ -37,8 +37,7 @@ All code lives in package `main` at the project root.
 
 | Subcommand | Purpose |
 |------------|---------|
-| `generate-image <output>` | Generate a new image from a prompt on stdin. Also accepts optional reference images as earlier positionals (in which case it edits). Alias: `gen-img`. |
-| `edit-image <refs...> <output>` | Same pipeline as `generate-image`, but requires at least one reference image. Provides FAL-sandbox-style discovery for the edit workflow. |
+| `generate [refs...] <output>` | Reads prompt from stdin, writes image to disk. Earlier positionals that exist as image files become reference images (max 3) and pix uses the FAL edit endpoint. Alias: `gen`. |
 | `cost` | Queries pricing for configured model |
 
 Each subcommand parses its own flags, including a subcommand-specific `--help` / `-h` and `--dry-run` (where applicable).
@@ -48,7 +47,7 @@ Each subcommand parses its own flags, including a subcommand-specific `--help` /
 Two categories enforced strictly:
 
 - **Global flags** (must be placed before the subcommand): `--quiet` / `-q`, `--version`, top-level `--help` / `-h`
-- **Subcommand flags** (must be placed after the subcommand): `--dry-run`, `--preview` / `-p` (`generate-image` and `edit-image`), subcommand-specific `--help` / `-h`
+- **Subcommand flags** (must be placed after the subcommand): `--dry-run`, `--preview` / `-p` (`generate` only), `--load-prompt` / `--no-load-prompt` (`generate` only), subcommand-specific `--help` / `-h`
 
 Misplaced flags exit non-zero with a clear error. `--help` is mutually exclusive with all other flags and arguments.
 
@@ -67,7 +66,7 @@ The tool calls three FAL endpoints:
 
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
-| `https://fal.run/{model}` | POST | Image generation (`gen-img`) |
+| `https://fal.run/{model}` | POST | Image generation (`generate`) |
 | `https://api.fal.ai/v1/models/pricing?endpoint_id={model}` | GET | Unit price lookup (`cost`, post-generation cost) |
 | `https://api.fal.ai/v1/models/pricing/estimate` | POST | Historical cost estimate (`cost`) |
 
@@ -95,7 +94,7 @@ Future enhancements, in rough priority order:
 
 | Feature | Description | Complexity |
 |---------|-------------|------------|
-| Reference image / edit mode | Add reference image support to `pix generate-image` via positional args. Uses FAL's `/edit` endpoint with `image_urls` parameter. See [#4](https://github.com/tadg-paul/pix/issues/4). | Medium |
+| Reference image / edit mode | Reference image support added to `pix generate` via positional args. Uses FAL's `/edit` endpoint with `image_urls` parameter. Implemented in #4. | Done |
 | Editor invocation for prompts | Allow `$VISUAL`/`$EDITOR` to open the selected saved prompt for free-form editing instead of single-line append. Deferred from [#8](https://github.com/tadg-paul/pix/issues/8). | Medium |
 | `--model` flag | Override `config.yaml` model per invocation. Enables comparing models. | Small |
 | Image dimensions | Support `--aspect-ratio` or `--size` presets. FAL API accepts `aspect_ratio` ("1:1", "16:9") and `resolution` ("1k", "2k"). | Small |
