@@ -18,10 +18,17 @@ type apiKeyConfig struct {
 	File    string `yaml:"file"`
 }
 
+type loadPromptConfig struct {
+	Path   string `yaml:"path"`
+	Picker string `yaml:"picker"`
+	Always bool   `yaml:"always"`
+}
+
 type config struct {
 	Model          string                  `yaml:"model"`
 	APIKeys        map[string]apiKeyConfig `yaml:"api-keys"`
 	PreviewCommand string                  `yaml:"preview-command"`
+	LoadPrompt     loadPromptConfig        `yaml:"load-prompt"`
 }
 
 // loadConfig reads config.yaml.
@@ -97,7 +104,11 @@ func resolveFALKey(cfg *config, confDir string) (string, error) {
 		}
 
 		if falCfg.File != "" {
-			data, err := os.ReadFile(falCfg.File)
+			expandedFile, err := expandTilde(falCfg.File)
+			if err != nil {
+				return "", fmt.Errorf("api-keys.fal.file: %w", err)
+			}
+			data, err := os.ReadFile(expandedFile)
 			if err != nil {
 				return "", fmt.Errorf("api-keys.fal.file: %w", err)
 			}

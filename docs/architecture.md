@@ -1,4 +1,4 @@
-<!-- Version: 0.3 | Last updated: 2026-05-10 -->
+<!-- Version: 0.4 | Last updated: 2026-05-12 -->
 
 # Architecture
 
@@ -31,6 +31,7 @@ All code lives in package `main` at the project root.
 | `cost.go` | `pix cost` handler -- queries pricing without generation |
 | `config.go` | `config.yaml` loading, API key resolution, config directory resolution |
 | `fal.go` | FAL API HTTP helpers (generation, pricing, historical estimate) |
+| `prompts.go` | `--load-prompt` flow -- enumerates saved-prompt files, invokes the configured picker, assembles base + optional appended text |
 
 ### Subcommands
 
@@ -95,6 +96,7 @@ Future enhancements, in rough priority order:
 | Feature | Description | Complexity |
 |---------|-------------|------------|
 | Reference image / edit mode | Add reference image support to `pix generate-image` via positional args. Uses FAL's `/edit` endpoint with `image_urls` parameter. See [#4](https://github.com/tadg-paul/pix/issues/4). | Medium |
+| Editor invocation for prompts | Allow `$VISUAL`/`$EDITOR` to open the selected saved prompt for free-form editing instead of single-line append. Deferred from [#8](https://github.com/tadg-paul/pix/issues/8). | Medium |
 | `--model` flag | Override `config.yaml` model per invocation. Enables comparing models. | Small |
 | Image dimensions | Support `--aspect-ratio` or `--size` presets. FAL API accepts `aspect_ratio` ("1:1", "16:9") and `resolution` ("1k", "2k"). | Small |
 | Homebrew formula | Cross-compiled binaries for Darwin/Linux/Windows. `make release` with GitHub releases. See [#3](https://github.com/tadg-paul/pix/issues/3). | Medium |

@@ -103,6 +103,8 @@ Run `pix <subcommand> --help` for subcommand-specific usage.
 |------|------------|-------------|
 | `--dry-run` | generate-image, edit-image, cost | Show what would happen without calling the API |
 | `-p`, `--preview` | generate-image, edit-image | Open the image after generation |
+| `--load-prompt` | generate-image, edit-image | Pick a saved prompt via fzf (or configured picker); requires a TTY |
+| `--no-load-prompt` | generate-image, edit-image | Disable load-prompt mode (overrides `load-prompt.always`) |
 
 `--help` is mutually exclusive with all other flags and arguments.
 
@@ -124,7 +126,23 @@ api-keys:
 
 # Custom preview command (optional -- defaults to open/xdg-open/start)
 # preview-command: chafa
+
+# Saved prompts (optional -- only required when --load-prompt is used)
+# load-prompt:
+#   path: ~/.config/pix/prompts    # directory of saved prompt files
+#   picker: fzf                    # default: fzf -- any selector that reads candidates from stdin and writes a selection to stdout
+#   always: false                  # if true, --load-prompt is implicit on every generate/edit invocation
 ```
+
+### Saved prompts
+
+`--load-prompt` opens the configured picker (default `fzf`) on the saved-prompts directory. Pick a file, and pix:
+
+1. Reads the file's contents as the base prompt.
+2. Displays it on stderr.
+3. Reads one line from stdin -- Enter sends as-is, any text becomes a suffix joined by a blank line.
+
+Cancelling the picker exits 0 without contacting FAL. The flag requires an interactive terminal; combining it with piped stdin is an error. Set `load-prompt.always: true` to make the flow implicit, with `--no-load-prompt` available per invocation when you want to type a prompt directly.
 
 ### API key resolution priority
 

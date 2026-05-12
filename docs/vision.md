@@ -1,4 +1,4 @@
-<!-- Version: 0.4 | Last updated: 2026-05-10 -->
+<!-- Version: 0.5 | Last updated: 2026-05-12 -->
 
 # Vision
 
@@ -21,7 +21,8 @@ pix cost
 
 - **Subcommand-based:** every distinct operation is its own subcommand. New features extend the surface, they don't bloat existing commands.
 - **Zero friction:** `make install` places the binary on `PATH`; a YAML config file is the only setup.
-- **Pipeline-friendly:** reads stdin, writes files, reports status to stderr. No interactive prompts.
+- **Pipeline-friendly:** reads stdin, writes files, reports status to stderr. No interactive prompts by default.
+- **Reusable prompts:** an opt-in `--load-prompt` flow lets users keep a directory of saved prompts and pick one interactively via fzf (or any configured picker), optionally appending text on the fly.
 - **Cost-aware:** reports generation cost when the FAL pricing API has data; standalone cost lookup via `pix cost`.
 
 ## Non-goals (for now)

@@ -44,12 +44,14 @@ func printGenImgUsage(subcommandName string) {
 	}
 	fmt.Fprintln(os.Stderr, "")
 	fmt.Fprintln(os.Stderr, "Flags:")
-	fmt.Fprintln(os.Stderr, "  -h, --help       Show this help message")
-	fmt.Fprintln(os.Stderr, "  --dry-run        Show what would happen without calling the API")
-	fmt.Fprintln(os.Stderr, "  -p, --preview    Open the image after generation")
+	fmt.Fprintln(os.Stderr, "  -h, --help          Show this help message")
+	fmt.Fprintln(os.Stderr, "  --dry-run           Show what would happen without calling the API")
+	fmt.Fprintln(os.Stderr, "  -p, --preview       Open the image after generation")
+	fmt.Fprintln(os.Stderr, "  --load-prompt       Pick a saved prompt via fzf (or configured picker)")
+	fmt.Fprintln(os.Stderr, "  --no-load-prompt    Disable load-prompt mode for this invocation")
 	fmt.Fprintln(os.Stderr, "")
 	fmt.Fprintln(os.Stderr, "Global flags (place before subcommand):")
-	fmt.Fprintln(os.Stderr, "  -q, --quiet      Suppress non-error output")
+	fmt.Fprintln(os.Stderr, "  -q, --quiet         Suppress non-error output")
 }
 
 // runGenImg handles the generate-image and edit-image subcommands. globalQuiet
@@ -62,6 +64,8 @@ func runGenImg(args []string, globalQuiet bool, subcommandName string) int {
 	dryRun := false
 	preview := false
 	helpRequested := false
+	loadPromptFlag := false
+	noLoadPromptFlag := false
 	var positionals []string
 
 	for _, arg := range args {
@@ -72,6 +76,10 @@ func runGenImg(args []string, globalQuiet bool, subcommandName string) int {
 			dryRun = true
 		case "-p", "--preview":
 			preview = true
+		case "--load-prompt":
+			loadPromptFlag = true
+		case "--no-load-prompt":
+			noLoadPromptFlag = true
 		case "-q", "--quiet":
 			fmt.Fprintln(os.Stderr, "Error: --quiet is a global flag and must be placed before the subcommand")
 			fmt.Fprintf(os.Stderr, "       (try: pix --quiet %s ...)\n", subcommandName)
@@ -88,7 +96,7 @@ func runGenImg(args []string, globalQuiet bool, subcommandName string) int {
 
 	// --help is mutually exclusive with all other args/flags.
 	if helpRequested {
-		hasOther := dryRun || preview || len(positionals) > 0
+		hasOther := dryRun || preview || loadPromptFlag || noLoadPromptFlag || len(positionals) > 0
 		if hasOther {
 			fmt.Fprintln(os.Stderr, "Error: --help cannot be combined with other flags or arguments")
 			printGenImgUsage(subcommandName)
@@ -131,16 +139,6 @@ func runGenImg(args []string, globalQuiet bool, subcommandName string) int {
 		}
 	}
 
-	prompt, err := readPrompt()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error reading stdin: %v\n", err)
-		return 1
-	}
-	if prompt == "" {
-		fmt.Fprintln(os.Stderr, "Error: no prompt provided on stdin")
-		return 1
-	}
-
 	confDir, err := resolveConfDir()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -151,6 +149,35 @@ func runGenImg(args []string, globalQuiet bool, subcommandName string) int {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		return 1
+	}
+
+	useLoadPrompt := !noLoadPromptFlag && (loadPromptFlag || cfg.LoadPrompt.Always)
+
+	var prompt string
+	if useLoadPrompt {
+		if !isStdinTTY() {
+			fmt.Fprintln(os.Stderr, "Error: --load-prompt requires an interactive terminal (stdin must not be piped/redirected)")
+			return 2
+		}
+		result, err := runLoadPromptFlow(cfg, globalQuiet)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			return 1
+		}
+		if result.Cancelled {
+			return 0
+		}
+		prompt = result.Prompt
+	} else {
+		prompt, err = readPrompt()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error reading stdin: %v\n", err)
+			return 1
+		}
+		if prompt == "" {
+			fmt.Fprintln(os.Stderr, "Error: no prompt provided on stdin")
+			return 1
+		}
 	}
 
 	falKey, err := resolveFALKey(cfg, confDir)

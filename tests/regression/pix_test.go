@@ -2092,3 +2092,826 @@ func TestEditImg_help_text_mentions_required_ref_RT7_7(t *testing.T) {
 		t.Errorf("Expected --help to mention reference image is required, got: %q", stderr)
 	}
 }
+
+// --- Load-prompt mode tests (issue #8) ---
+
+// writePromptFile creates a saved-prompt file with given content.
+func writePromptFile(t *testing.T, dir, name, content string) string {
+	t.Helper()
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatalf("Failed to write prompt file: %v", err)
+	}
+	return path
+}
+
+// loadPromptConfigYAML builds a config.yaml fragment for load-prompt mode.
+func loadPromptConfigYAML(model, promptsPath, picker string, always bool) string {
+	cfg := "model: " + model + "\n"
+	cfg += "load-prompt:\n"
+	cfg += "  path: " + promptsPath + "\n"
+	if picker != "" {
+		cfg += "  picker: " + picker + "\n"
+	}
+	if always {
+		cfg += "  always: true\n"
+	}
+	return cfg
+}
+
+// ttyEnv returns env vars to make pix treat stdin as TTY for load-prompt tests.
+func ttyEnv(extra ...string) []string {
+	return append([]string{"PIX_TEST_TTY=1"}, extra...)
+}
+
+// pickFirst is a picker command that emits the first candidate line.
+const pickFirst = "head -n 1"
+
+// pickCancel exits non-zero to simulate user cancellation. The picker config
+// is invoked via 'sh -c', so this becomes 'sh -c "false"' which exits 1.
+const pickCancel = "false"
+
+// RT-8.1: generate-image --load-prompt is a recognised flag.
+func TestLoadPrompt_genimg_flag_recognised_RT8_1(t *testing.T) {
+	bin := buildBinary(t)
+	promptsDir := t.TempDir()
+	writePromptFile(t, promptsDir, "p1.md", "a sunlit garden")
+
+	binPath := setupEnvWithConfig(t, bin, "FAL_KEY=test\n",
+		loadPromptConfigYAML("fal-ai/grok-2-aurora", promptsDir, pickFirst, false))
+
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPI(t, successHandler(t, imageServer, nil), nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	_, stderr, exitCode := runBinary(t, binPath, []string{"generate-image", "--load-prompt", outFile}, "\n",
+		ttyEnv("FAL_BASE_URL="+server.URL))
+
+	if exitCode != 0 {
+		t.Errorf("Expected exit 0 for --load-prompt, got %d; stderr: %s", exitCode, stderr)
+	}
+}
+
+// RT-8.2: edit-image --load-prompt is a recognised flag.
+func TestLoadPrompt_editimg_flag_recognised_RT8_2(t *testing.T) {
+	bin := buildBinary(t)
+	promptsDir := t.TempDir()
+	writePromptFile(t, promptsDir, "p1.md", "make it grayscale")
+
+	refDir := t.TempDir()
+	refPath := writeRefImage(t, refDir, "ref.png", fakeImagePNG)
+
+	binPath := setupEnvWithConfig(t, bin, "FAL_KEY=test\n",
+		loadPromptConfigYAML("fal-ai/grok-2-aurora", promptsDir, pickFirst, false))
+
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPI(t, successHandler(t, imageServer, nil), nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	_, stderr, exitCode := runBinary(t, binPath, []string{"edit-image", "--load-prompt", refPath, outFile}, "\n",
+		ttyEnv("FAL_BASE_URL="+server.URL))
+
+	if exitCode != 0 {
+		t.Errorf("Expected exit 0 for --load-prompt on edit-image, got %d; stderr: %s", exitCode, stderr)
+	}
+}
+
+// RT-8.3: generate-image --no-load-prompt is a recognised flag.
+func TestLoadPrompt_genimg_no_flag_recognised_RT8_3(t *testing.T) {
+	bin := buildBinary(t)
+	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
+
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPI(t, successHandler(t, imageServer, nil), nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	_, stderr, exitCode := runBinary(t, binPath, []string{"generate-image", "--no-load-prompt", outFile}, "a cat",
+		[]string{"FAL_BASE_URL=" + server.URL})
+
+	if exitCode != 0 {
+		t.Errorf("Expected exit 0 for --no-load-prompt, got %d; stderr: %s", exitCode, stderr)
+	}
+}
+
+// RT-8.4: edit-image --no-load-prompt is a recognised flag.
+func TestLoadPrompt_editimg_no_flag_recognised_RT8_4(t *testing.T) {
+	bin := buildBinary(t)
+	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
+
+	refDir := t.TempDir()
+	refPath := writeRefImage(t, refDir, "ref.png", fakeImagePNG)
+
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPI(t, successHandler(t, imageServer, nil), nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	_, stderr, exitCode := runBinary(t, binPath, []string{"edit-image", "--no-load-prompt", refPath, outFile}, "a cat",
+		[]string{"FAL_BASE_URL=" + server.URL})
+
+	if exitCode != 0 {
+		t.Errorf("Expected exit 0 for --no-load-prompt on edit-image, got %d; stderr: %s", exitCode, stderr)
+	}
+}
+
+// RT-8.5: Candidate list passed to picker matches files in load-prompt.path.
+func TestLoadPrompt_candidates_passed_to_picker_RT8_5(t *testing.T) {
+	bin := buildBinary(t)
+	promptsDir := t.TempDir()
+	writePromptFile(t, promptsDir, "alpha.md", "alpha content")
+	writePromptFile(t, promptsDir, "beta.md", "beta content")
+	writePromptFile(t, promptsDir, "gamma.md", "gamma content")
+
+	// Picker writes received candidates to a file we can inspect.
+	candidatesLog := filepath.Join(t.TempDir(), "candidates.log")
+	picker := "tee " + candidatesLog + " | head -n 1"
+
+	binPath := setupEnvWithConfig(t, bin, "FAL_KEY=test\n",
+		loadPromptConfigYAML("fal-ai/grok-2-aurora", promptsDir, picker, false))
+
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPI(t, successHandler(t, imageServer, nil), nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	runBinary(t, binPath, []string{"generate-image", "--load-prompt", outFile}, "\n",
+		ttyEnv("FAL_BASE_URL="+server.URL))
+
+	data, err := os.ReadFile(candidatesLog)
+	if err != nil {
+		t.Fatalf("Failed to read candidates log: %v", err)
+	}
+	got := string(data)
+	for _, name := range []string{"alpha.md", "beta.md", "gamma.md"} {
+		if !strings.Contains(got, name) {
+			t.Errorf("Expected candidate list to contain %s, got: %q", name, got)
+		}
+	}
+}
+
+// RT-8.6: Selected file contents become the base prompt sent to FAL.
+func TestLoadPrompt_selected_becomes_prompt_RT8_6(t *testing.T) {
+	bin := buildBinary(t)
+	promptsDir := t.TempDir()
+	writePromptFile(t, promptsDir, "p1.md", "a sunlit garden with bees")
+
+	binPath := setupEnvWithConfig(t, bin, "FAL_KEY=test\n",
+		loadPromptConfigYAML("fal-ai/grok-2-aurora", promptsDir, pickFirst, false))
+
+	var capturedBody string
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPI(t, successHandler(t, imageServer, &capturedBody), nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	runBinary(t, binPath, []string{"generate-image", "--load-prompt", outFile}, "\n",
+		ttyEnv("FAL_BASE_URL="+server.URL))
+
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(capturedBody), &parsed); err != nil {
+		t.Fatalf("Failed to parse request body: %v\nbody=%q", err, capturedBody)
+	}
+	if got, _ := parsed["prompt"].(string); got != "a sunlit garden with bees" {
+		t.Errorf("Expected prompt 'a sunlit garden with bees', got: %q", got)
+	}
+}
+
+// RT-8.7: Picker non-zero exit (user cancellation) triggers pix exit 0 with no API call.
+func TestLoadPrompt_picker_cancel_exits_zero_RT8_7(t *testing.T) {
+	bin := buildBinary(t)
+	promptsDir := t.TempDir()
+	writePromptFile(t, promptsDir, "p1.md", "anything")
+
+	binPath := setupEnvWithConfig(t, bin, "FAL_KEY=test\n",
+		loadPromptConfigYAML("fal-ai/grok-2-aurora", promptsDir, pickCancel, false))
+
+	apiCalled := false
+	server := startFakeAPI(t, func(w http.ResponseWriter, r *http.Request) {
+		apiCalled = true
+		http.Error(w, "should not be called", 500)
+	}, nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	_, _, exitCode := runBinary(t, binPath, []string{"generate-image", "--load-prompt", outFile}, "\n",
+		ttyEnv("FAL_BASE_URL="+server.URL))
+
+	if exitCode != 0 {
+		t.Errorf("Expected exit 0 on cancellation, got %d", exitCode)
+	}
+	if apiCalled {
+		t.Errorf("Expected no API call on cancellation")
+	}
+	if _, err := os.Stat(outFile); err == nil {
+		t.Errorf("Expected no output file on cancellation")
+	}
+}
+
+// RT-8.8: Piped non-empty stdin + --load-prompt exits non-zero.
+func TestLoadPrompt_piped_stdin_errors_RT8_8(t *testing.T) {
+	bin := buildBinary(t)
+	promptsDir := t.TempDir()
+	writePromptFile(t, promptsDir, "p1.md", "x")
+
+	binPath := setupEnvWithConfig(t, bin, "FAL_KEY=test\n",
+		loadPromptConfigYAML("fal-ai/grok-2-aurora", promptsDir, pickFirst, false))
+
+	// No PIX_TEST_TTY env -> stdin treated as non-TTY pipe.
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	_, stderr, exitCode := runBinary(t, binPath, []string{"generate-image", "--load-prompt", outFile}, "piped content", nil)
+
+	if exitCode == 0 {
+		t.Errorf("Expected non-zero exit for piped stdin + --load-prompt; stderr: %s", stderr)
+	}
+	lower := strings.ToLower(stderr)
+	if !strings.Contains(lower, "terminal") && !strings.Contains(lower, "tty") && !strings.Contains(lower, "interactive") {
+		t.Errorf("Expected TTY-required error, got: %q", stderr)
+	}
+}
+
+// RT-8.9: Piped empty stdin + --load-prompt exits non-zero.
+func TestLoadPrompt_piped_empty_stdin_errors_RT8_9(t *testing.T) {
+	bin := buildBinary(t)
+	promptsDir := t.TempDir()
+	writePromptFile(t, promptsDir, "p1.md", "x")
+
+	binPath := setupEnvWithConfig(t, bin, "FAL_KEY=test\n",
+		loadPromptConfigYAML("fal-ai/grok-2-aurora", promptsDir, pickFirst, false))
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	_, stderr, exitCode := runBinary(t, binPath, []string{"generate-image", "--load-prompt", outFile}, "", nil)
+
+	if exitCode == 0 {
+		t.Errorf("Expected non-zero exit for empty piped stdin + --load-prompt; stderr: %s", stderr)
+	}
+	lower := strings.ToLower(stderr)
+	if !strings.Contains(lower, "terminal") && !strings.Contains(lower, "tty") && !strings.Contains(lower, "interactive") {
+		t.Errorf("Expected TTY-required error, got: %q", stderr)
+	}
+}
+
+// RT-8.10: --load-prompt with no load-prompt section in config exits non-zero.
+func TestLoadPrompt_no_section_errors_RT8_10(t *testing.T) {
+	bin := buildBinary(t)
+	binPath := setupEnvWithConfig(t, bin, "FAL_KEY=test\n", "model: fal-ai/grok-2-aurora\n")
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	_, stderr, exitCode := runBinary(t, binPath, []string{"generate-image", "--load-prompt", outFile}, "\n",
+		ttyEnv())
+
+	if exitCode == 0 {
+		t.Errorf("Expected non-zero exit when load-prompt section missing; stderr: %s", stderr)
+	}
+	lower := strings.ToLower(stderr)
+	if !strings.Contains(lower, "load-prompt") && !strings.Contains(lower, "path") {
+		t.Errorf("Expected config error mentioning load-prompt/path, got: %q", stderr)
+	}
+}
+
+// RT-8.11: --load-prompt with load-prompt present but path empty exits non-zero.
+func TestLoadPrompt_empty_path_errors_RT8_11(t *testing.T) {
+	bin := buildBinary(t)
+	cfg := "model: fal-ai/grok-2-aurora\nload-prompt:\n  picker: head -n 1\n"
+	binPath := setupEnvWithConfig(t, bin, "FAL_KEY=test\n", cfg)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	_, stderr, exitCode := runBinary(t, binPath, []string{"generate-image", "--load-prompt", outFile}, "\n",
+		ttyEnv())
+
+	if exitCode == 0 {
+		t.Errorf("Expected non-zero exit when path is empty; stderr: %s", stderr)
+	}
+}
+
+// RT-8.12: --load-prompt with picker not on PATH exits non-zero with error naming picker.
+func TestLoadPrompt_picker_missing_errors_RT8_12(t *testing.T) {
+	bin := buildBinary(t)
+	promptsDir := t.TempDir()
+	writePromptFile(t, promptsDir, "p1.md", "x")
+
+	binPath := setupEnvWithConfig(t, bin, "FAL_KEY=test\n",
+		loadPromptConfigYAML("fal-ai/grok-2-aurora", promptsDir, "/nonexistent/binary-xyzzy", false))
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	_, stderr, exitCode := runBinary(t, binPath, []string{"generate-image", "--load-prompt", outFile}, "\n",
+		ttyEnv())
+
+	if exitCode == 0 {
+		t.Errorf("Expected non-zero exit for missing picker; stderr: %s", stderr)
+	}
+	if !strings.Contains(stderr, "xyzzy") && !strings.Contains(strings.ToLower(stderr), "picker") {
+		t.Errorf("Expected error mentioning picker, got: %q", stderr)
+	}
+}
+
+// RT-8.13: --load-prompt with nonexistent directory exits non-zero.
+func TestLoadPrompt_nonexistent_dir_errors_RT8_13(t *testing.T) {
+	bin := buildBinary(t)
+	binPath := setupEnvWithConfig(t, bin, "FAL_KEY=test\n",
+		loadPromptConfigYAML("fal-ai/grok-2-aurora", "/nonexistent/dir-xyzzy", pickFirst, false))
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	_, stderr, exitCode := runBinary(t, binPath, []string{"generate-image", "--load-prompt", outFile}, "\n",
+		ttyEnv())
+
+	if exitCode == 0 {
+		t.Errorf("Expected non-zero exit for nonexistent prompts dir; stderr: %s", stderr)
+	}
+}
+
+// RT-8.14: --load-prompt with empty directory exits non-zero.
+func TestLoadPrompt_empty_dir_errors_RT8_14(t *testing.T) {
+	bin := buildBinary(t)
+	emptyDir := t.TempDir()
+	binPath := setupEnvWithConfig(t, bin, "FAL_KEY=test\n",
+		loadPromptConfigYAML("fal-ai/grok-2-aurora", emptyDir, pickFirst, false))
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	_, stderr, exitCode := runBinary(t, binPath, []string{"generate-image", "--load-prompt", outFile}, "\n",
+		ttyEnv())
+
+	if exitCode == 0 {
+		t.Errorf("Expected non-zero exit for empty prompts dir; stderr: %s", stderr)
+	}
+	lower := strings.ToLower(stderr)
+	if !strings.Contains(lower, "empty") && !strings.Contains(lower, "no files") && !strings.Contains(lower, "no prompts") {
+		t.Errorf("Expected error about empty directory, got: %q", stderr)
+	}
+}
+
+// RT-8.15: Selected prompt contents appear on stderr after picker exits.
+func TestLoadPrompt_selection_displayed_on_stderr_RT8_15(t *testing.T) {
+	bin := buildBinary(t)
+	promptsDir := t.TempDir()
+	writePromptFile(t, promptsDir, "p1.md", "MAGIC-MARKER-12345 something distinct")
+
+	binPath := setupEnvWithConfig(t, bin, "FAL_KEY=test\n",
+		loadPromptConfigYAML("fal-ai/grok-2-aurora", promptsDir, pickFirst, false))
+
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPI(t, successHandler(t, imageServer, nil), nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	_, stderr, _ := runBinary(t, binPath, []string{"generate-image", "--load-prompt", outFile}, "\n",
+		ttyEnv("FAL_BASE_URL="+server.URL))
+
+	if !strings.Contains(stderr, "MAGIC-MARKER-12345") {
+		t.Errorf("Expected selected prompt contents on stderr, got: %q", stderr)
+	}
+}
+
+// RT-8.16: pix reads exactly one line from stdin post-selection.
+func TestLoadPrompt_reads_one_line_RT8_16(t *testing.T) {
+	bin := buildBinary(t)
+	promptsDir := t.TempDir()
+	writePromptFile(t, promptsDir, "p1.md", "base prompt")
+
+	binPath := setupEnvWithConfig(t, bin, "FAL_KEY=test\n",
+		loadPromptConfigYAML("fal-ai/grok-2-aurora", promptsDir, pickFirst, false))
+
+	var capturedBody string
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPI(t, successHandler(t, imageServer, &capturedBody), nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	// Stdin has two lines; only first should be read as additional text.
+	runBinary(t, binPath, []string{"generate-image", "--load-prompt", outFile},
+		"first line addition\nsecond line should be ignored\n",
+		ttyEnv("FAL_BASE_URL="+server.URL))
+
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(capturedBody), &parsed); err != nil {
+		t.Fatalf("Failed to parse: %v", err)
+	}
+	got, _ := parsed["prompt"].(string)
+	if strings.Contains(got, "second line") {
+		t.Errorf("Expected only first stdin line consumed, prompt was: %q", got)
+	}
+	if !strings.Contains(got, "first line addition") {
+		t.Errorf("Expected first stdin line in prompt, got: %q", got)
+	}
+}
+
+// RT-8.17: Under --quiet, prompt display is suppressed but stdin read still occurs.
+func TestLoadPrompt_quiet_suppresses_display_RT8_17(t *testing.T) {
+	bin := buildBinary(t)
+	promptsDir := t.TempDir()
+	writePromptFile(t, promptsDir, "p1.md", "DISTINCT-MARKER")
+
+	binPath := setupEnvWithConfig(t, bin, "FAL_KEY=test\n",
+		loadPromptConfigYAML("fal-ai/grok-2-aurora", promptsDir, pickFirst, false))
+
+	var capturedBody string
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPI(t, successHandler(t, imageServer, &capturedBody), nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	_, stderr, _ := runBinary(t, binPath, []string{"--quiet", "generate-image", "--load-prompt", outFile},
+		"appended\n", ttyEnv("FAL_BASE_URL="+server.URL))
+
+	// Display of prompt suppressed under --quiet
+	if strings.Contains(stderr, "DISTINCT-MARKER") {
+		t.Errorf("Expected --quiet to suppress prompt display, but stderr has it: %q", stderr)
+	}
+	// But the additional text read still happens
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(capturedBody), &parsed); err != nil {
+		t.Fatalf("Failed to parse: %v", err)
+	}
+	got, _ := parsed["prompt"].(string)
+	if !strings.Contains(got, "appended") {
+		t.Errorf("Expected appended text to be read under --quiet, got prompt: %q", got)
+	}
+}
+
+// RT-8.18: Captured FAL payload prompt equals <saved>\n\n<additional>.
+func TestLoadPrompt_join_with_double_newline_RT8_18(t *testing.T) {
+	bin := buildBinary(t)
+	promptsDir := t.TempDir()
+	writePromptFile(t, promptsDir, "p1.md", "a base prompt")
+
+	binPath := setupEnvWithConfig(t, bin, "FAL_KEY=test\n",
+		loadPromptConfigYAML("fal-ai/grok-2-aurora", promptsDir, pickFirst, false))
+
+	var capturedBody string
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPI(t, successHandler(t, imageServer, &capturedBody), nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	runBinary(t, binPath, []string{"generate-image", "--load-prompt", outFile},
+		"with extra detail\n", ttyEnv("FAL_BASE_URL="+server.URL))
+
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(capturedBody), &parsed); err != nil {
+		t.Fatalf("Failed to parse: %v", err)
+	}
+	got, _ := parsed["prompt"].(string)
+	want := "a base prompt\n\nwith extra detail"
+	if got != want {
+		t.Errorf("Expected prompt %q, got %q", want, got)
+	}
+}
+
+// RT-8.19: Empty additional text (Enter only) leaves prompt as saved.
+func TestLoadPrompt_empty_addition_no_trailing_RT8_19(t *testing.T) {
+	bin := buildBinary(t)
+	promptsDir := t.TempDir()
+	writePromptFile(t, promptsDir, "p1.md", "the base prompt")
+
+	binPath := setupEnvWithConfig(t, bin, "FAL_KEY=test\n",
+		loadPromptConfigYAML("fal-ai/grok-2-aurora", promptsDir, pickFirst, false))
+
+	var capturedBody string
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPI(t, successHandler(t, imageServer, &capturedBody), nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	runBinary(t, binPath, []string{"generate-image", "--load-prompt", outFile},
+		"\n", ttyEnv("FAL_BASE_URL="+server.URL))
+
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(capturedBody), &parsed); err != nil {
+		t.Fatalf("Failed to parse: %v", err)
+	}
+	got, _ := parsed["prompt"].(string)
+	if got != "the base prompt" {
+		t.Errorf("Expected prompt %q, got %q", "the base prompt", got)
+	}
+}
+
+// RT-8.20: Whitespace-only addition treated as empty.
+func TestLoadPrompt_whitespace_addition_no_trailing_RT8_20(t *testing.T) {
+	bin := buildBinary(t)
+	promptsDir := t.TempDir()
+	writePromptFile(t, promptsDir, "p1.md", "the base prompt")
+
+	binPath := setupEnvWithConfig(t, bin, "FAL_KEY=test\n",
+		loadPromptConfigYAML("fal-ai/grok-2-aurora", promptsDir, pickFirst, false))
+
+	var capturedBody string
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPI(t, successHandler(t, imageServer, &capturedBody), nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	runBinary(t, binPath, []string{"generate-image", "--load-prompt", outFile},
+		"   \t  \n", ttyEnv("FAL_BASE_URL="+server.URL))
+
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(capturedBody), &parsed); err != nil {
+		t.Fatalf("Failed to parse: %v", err)
+	}
+	got, _ := parsed["prompt"].(string)
+	if got != "the base prompt" {
+		t.Errorf("Expected prompt %q (whitespace-only addition trimmed), got %q", "the base prompt", got)
+	}
+}
+
+// RT-8.21: Config with all three load-prompt keys parses successfully.
+func TestLoadPrompt_config_parses_RT8_21(t *testing.T) {
+	bin := buildBinary(t)
+	promptsDir := t.TempDir()
+	writePromptFile(t, promptsDir, "p1.md", "x")
+
+	binPath := setupEnvWithConfig(t, bin, "FAL_KEY=test\n",
+		loadPromptConfigYAML("fal-ai/grok-2-aurora", promptsDir, pickFirst, true))
+
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPI(t, successHandler(t, imageServer, nil), nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	_, stderr, exitCode := runBinary(t, binPath, []string{"generate-image", outFile}, "\n",
+		ttyEnv("FAL_BASE_URL="+server.URL))
+
+	if exitCode != 0 {
+		t.Errorf("Expected config to parse and run cleanly; got %d; stderr: %s", exitCode, stderr)
+	}
+}
+
+// RT-8.22: Picker defaults to fzf when omitted.
+func TestLoadPrompt_picker_defaults_to_fzf_RT8_22(t *testing.T) {
+	bin := buildBinary(t)
+	promptsDir := t.TempDir()
+	writePromptFile(t, promptsDir, "p1.md", "x")
+
+	// Picker omitted -> default 'fzf'. fzf is presumably not on PATH in this test env;
+	// the error should mention 'fzf' rather than 'picker not configured'.
+	cfg := "model: fal-ai/grok-2-aurora\nload-prompt:\n  path: " + promptsDir + "\n"
+	binPath := setupEnvWithConfig(t, bin, "FAL_KEY=test\n", cfg)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	_, stderr, exitCode := runBinary(t, binPath,
+		[]string{"generate-image", "--load-prompt", outFile}, "\n",
+		ttyEnv("PATH=/nonexistent-only-path"))
+
+	if exitCode == 0 {
+		t.Errorf("Expected non-zero exit when fzf is not on PATH; stderr: %s", stderr)
+	}
+	if !strings.Contains(strings.ToLower(stderr), "fzf") {
+		t.Errorf("Expected default picker 'fzf' to appear in error, got: %q", stderr)
+	}
+}
+
+// RT-8.23: Always defaults to false when omitted.
+func TestLoadPrompt_always_defaults_false_RT8_23(t *testing.T) {
+	bin := buildBinary(t)
+	promptsDir := t.TempDir()
+	writePromptFile(t, promptsDir, "p1.md", "should-not-be-used")
+
+	// load-prompt configured but always not set; flag not used.
+	// Should behave as normal generate-image with stdin prompt.
+	binPath := setupEnvWithConfig(t, bin, "FAL_KEY=test\n",
+		loadPromptConfigYAML("fal-ai/grok-2-aurora", promptsDir, pickFirst, false))
+
+	var capturedBody string
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPI(t, successHandler(t, imageServer, &capturedBody), nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	runBinary(t, binPath, []string{"generate-image", outFile}, "user typed prompt",
+		[]string{"FAL_BASE_URL=" + server.URL})
+
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(capturedBody), &parsed); err != nil {
+		t.Fatalf("Failed to parse: %v", err)
+	}
+	got, _ := parsed["prompt"].(string)
+	if got != "user typed prompt" {
+		t.Errorf("Expected normal stdin path with always=false, got prompt: %q", got)
+	}
+}
+
+// RT-8.24: generate-image with always=true triggers picker even without flag.
+func TestLoadPrompt_always_triggers_genimg_RT8_24(t *testing.T) {
+	bin := buildBinary(t)
+	promptsDir := t.TempDir()
+	writePromptFile(t, promptsDir, "saved.md", "saved prompt body")
+
+	binPath := setupEnvWithConfig(t, bin, "FAL_KEY=test\n",
+		loadPromptConfigYAML("fal-ai/grok-2-aurora", promptsDir, pickFirst, true))
+
+	var capturedBody string
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPI(t, successHandler(t, imageServer, &capturedBody), nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	runBinary(t, binPath, []string{"generate-image", outFile}, "\n",
+		ttyEnv("FAL_BASE_URL="+server.URL))
+
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(capturedBody), &parsed); err != nil {
+		t.Fatalf("Failed to parse: %v", err)
+	}
+	got, _ := parsed["prompt"].(string)
+	if got != "saved prompt body" {
+		t.Errorf("Expected always:true to trigger picker; prompt was: %q", got)
+	}
+}
+
+// RT-8.25: edit-image with always=true triggers picker even without flag.
+func TestLoadPrompt_always_triggers_editimg_RT8_25(t *testing.T) {
+	bin := buildBinary(t)
+	promptsDir := t.TempDir()
+	writePromptFile(t, promptsDir, "saved.md", "edit prompt body")
+
+	refDir := t.TempDir()
+	refPath := writeRefImage(t, refDir, "ref.png", fakeImagePNG)
+
+	binPath := setupEnvWithConfig(t, bin, "FAL_KEY=test\n",
+		loadPromptConfigYAML("fal-ai/grok-2-aurora", promptsDir, pickFirst, true))
+
+	var capturedBody string
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPI(t, successHandler(t, imageServer, &capturedBody), nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	runBinary(t, binPath, []string{"edit-image", refPath, outFile}, "\n",
+		ttyEnv("FAL_BASE_URL="+server.URL))
+
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(capturedBody), &parsed); err != nil {
+		t.Fatalf("Failed to parse: %v", err)
+	}
+	got, _ := parsed["prompt"].(string)
+	if got != "edit prompt body" {
+		t.Errorf("Expected always:true to trigger picker on edit-image; prompt was: %q", got)
+	}
+}
+
+// RT-8.26: always:true + --no-load-prompt skips picker; stdin read directly.
+func TestLoadPrompt_no_flag_overrides_always_RT8_26(t *testing.T) {
+	bin := buildBinary(t)
+	promptsDir := t.TempDir()
+	writePromptFile(t, promptsDir, "saved.md", "this should be skipped")
+
+	binPath := setupEnvWithConfig(t, bin, "FAL_KEY=test\n",
+		loadPromptConfigYAML("fal-ai/grok-2-aurora", promptsDir, pickFirst, true))
+
+	var capturedBody string
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPI(t, successHandler(t, imageServer, &capturedBody), nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	runBinary(t, binPath, []string{"generate-image", "--no-load-prompt", outFile},
+		"typed by user", []string{"FAL_BASE_URL=" + server.URL})
+
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(capturedBody), &parsed); err != nil {
+		t.Fatalf("Failed to parse: %v", err)
+	}
+	got, _ := parsed["prompt"].(string)
+	if got != "typed by user" {
+		t.Errorf("Expected --no-load-prompt to skip picker; prompt was: %q", got)
+	}
+}
+
+// RT-8.27: --dry-run --load-prompt exits 0, no API call.
+func TestLoadPrompt_dry_run_no_api_call_RT8_27(t *testing.T) {
+	bin := buildBinary(t)
+	promptsDir := t.TempDir()
+	writePromptFile(t, promptsDir, "p1.md", "dry run prompt")
+
+	binPath := setupEnvWithConfig(t, bin, "FAL_KEY=test\n",
+		loadPromptConfigYAML("fal-ai/grok-2-aurora", promptsDir, pickFirst, false))
+
+	apiCalled := false
+	server := startFakeAPI(t, func(w http.ResponseWriter, r *http.Request) {
+		apiCalled = true
+	}, nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	_, _, exitCode := runBinary(t, binPath,
+		[]string{"generate-image", "--load-prompt", "--dry-run", outFile}, "\n",
+		ttyEnv("FAL_BASE_URL="+server.URL))
+
+	if exitCode != 0 {
+		t.Errorf("Expected exit 0 for --dry-run --load-prompt, got %d", exitCode)
+	}
+	if apiCalled {
+		t.Errorf("Expected no API call under --dry-run")
+	}
+}
+
+// RT-8.29: Tilde-prefixed load-prompt.path resolves to $HOME-relative directory.
+// User action: writes `path: ~/snips/prompts-genai` in config; pix finds the files.
+func TestLoadPrompt_tilde_in_path_RT8_29(t *testing.T) {
+	bin := buildBinary(t)
+	fakeHome := t.TempDir()
+	promptsDir := filepath.Join(fakeHome, "snips", "prompts-genai")
+	if err := os.MkdirAll(promptsDir, 0755); err != nil {
+		t.Fatalf("Failed to mkdir: %v", err)
+	}
+	writePromptFile(t, promptsDir, "p1.md", "tilde-expanded base")
+
+	binPath := setupEnvWithConfig(t, bin, "FAL_KEY=test\n",
+		loadPromptConfigYAML("fal-ai/grok-2-aurora", "~/snips/prompts-genai", pickFirst, false))
+
+	var capturedBody string
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPI(t, successHandler(t, imageServer, &capturedBody), nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	_, stderr, exitCode := runBinary(t, binPath, []string{"generate-image", "--load-prompt", outFile}, "\n",
+		[]string{"HOME=" + fakeHome, "FAL_BASE_URL=" + server.URL, "PIX_TEST_TTY=1"})
+
+	if exitCode != 0 {
+		t.Fatalf("Expected exit 0 with tilde-expanded path, got %d; stderr: %s", exitCode, stderr)
+	}
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(capturedBody), &parsed); err != nil {
+		t.Fatalf("Failed to parse: %v", err)
+	}
+	got, _ := parsed["prompt"].(string)
+	if got != "tilde-expanded base" {
+		t.Errorf("Expected prompt from tilde-resolved path; got: %q", got)
+	}
+}
+
+// RT-8.30: Tilde-prefixed picker path resolves before LookPath.
+// User action: writes `picker: ~/bin/my-picker` in config; pix finds the binary.
+func TestLoadPrompt_tilde_in_picker_RT8_30(t *testing.T) {
+	bin := buildBinary(t)
+	fakeHome := t.TempDir()
+	pickerDir := filepath.Join(fakeHome, "bin")
+	if err := os.MkdirAll(pickerDir, 0755); err != nil {
+		t.Fatalf("Failed to mkdir: %v", err)
+	}
+	pickerScript := filepath.Join(pickerDir, "my-picker")
+	if err := os.WriteFile(pickerScript, []byte("#!/bin/sh\nhead -n 1\n"), 0755); err != nil {
+		t.Fatalf("Failed to write picker: %v", err)
+	}
+
+	promptsDir := t.TempDir()
+	writePromptFile(t, promptsDir, "p1.md", "picker-tilde works")
+
+	binPath := setupEnvWithConfig(t, bin, "FAL_KEY=test\n",
+		loadPromptConfigYAML("fal-ai/grok-2-aurora", promptsDir, "~/bin/my-picker", false))
+
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPI(t, successHandler(t, imageServer, nil), nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	_, stderr, exitCode := runBinary(t, binPath, []string{"generate-image", "--load-prompt", outFile}, "\n",
+		[]string{"HOME=" + fakeHome, "FAL_BASE_URL=" + server.URL, "PIX_TEST_TTY=1"})
+
+	if exitCode != 0 {
+		t.Errorf("Expected exit 0 with tilde-expanded picker, got %d; stderr: %s", exitCode, stderr)
+	}
+}
+
+// RT-8.31: Tilde-prefixed api-keys.fal.file resolves to $HOME-relative path.
+// User action: writes `file: ~/.fal-key` in config; pix reads the key.
+func TestAPIKeys_tilde_in_file_RT8_31(t *testing.T) {
+	bin := buildBinary(t)
+	fakeHome := t.TempDir()
+	keyFile := filepath.Join(fakeHome, ".fal-key")
+	if err := os.WriteFile(keyFile, []byte("tilde-resolved-key\n"), 0600); err != nil {
+		t.Fatalf("Failed to write key file: %v", err)
+	}
+
+	cfg := "model: fal-ai/grok-2-aurora\napi-keys:\n  fal:\n    file: ~/.fal-key\n"
+	binPath := setupEnvWithConfig(t, bin, "", cfg)
+
+	var capturedAuth string
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPI(t, func(w http.ResponseWriter, r *http.Request) {
+		capturedAuth = r.Header.Get("Authorization")
+		resp := map[string]interface{}{
+			"images": []map[string]interface{}{
+				{"url": imageServer.URL + "/img.png"},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}, nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	_, stderr, exitCode := runBinary(t, binPath, []string{"generate-image", outFile}, "a cat",
+		[]string{"HOME=" + fakeHome, "FAL_BASE_URL=" + server.URL})
+
+	if exitCode != 0 {
+		t.Fatalf("Expected exit 0 with tilde-expanded api-keys.fal.file, got %d; stderr: %s", exitCode, stderr)
+	}
+	if !strings.Contains(capturedAuth, "tilde-resolved-key") {
+		t.Errorf("Expected key from tilde-resolved file in Authorization, got: %q", capturedAuth)
+	}
+}
+
+// RT-8.28: --dry-run --load-prompt payload preview shows joined prompt.
+func TestLoadPrompt_dry_run_shows_joined_prompt_RT8_28(t *testing.T) {
+	bin := buildBinary(t)
+	promptsDir := t.TempDir()
+	writePromptFile(t, promptsDir, "p1.md", "saved part")
+
+	binPath := setupEnvWithConfig(t, bin, "FAL_KEY=test\n",
+		loadPromptConfigYAML("fal-ai/grok-2-aurora", promptsDir, pickFirst, false))
+
+	server := startFakeAPI(t, func(w http.ResponseWriter, r *http.Request) {}, nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	_, stderr, _ := runBinary(t, binPath,
+		[]string{"generate-image", "--load-prompt", "--dry-run", outFile},
+		"extra part\n", ttyEnv("FAL_BASE_URL="+server.URL))
+
+	if !strings.Contains(stderr, "saved part") {
+		t.Errorf("Expected dry-run preview to contain saved part of prompt; got: %q", stderr)
+	}
+	if !strings.Contains(stderr, "extra part") {
+		t.Errorf("Expected dry-run preview to contain additional part of prompt; got: %q", stderr)
+	}
+}
