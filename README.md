@@ -184,6 +184,10 @@ If no file extension is provided, the API response format is used (typically `.j
 | `cost.go` | cost subcommand handler |
 | `config.go` | Config loading and API key resolution |
 | `fal.go` | FAL API HTTP client helpers |
+| `prompts.go` | `--load-prompt` flow (saved-prompt picker) |
+| `models.go` | `--pick-model` flow (FAL `/v1/models` picker) |
+| `helptext.go` | Loads embedded help text from `docs/helptext/*.md` |
+| `docs/helptext/*.md` | Help text source per subcommand -- embedded into the binary at build time |
 | `config.yaml` | Default model configuration |
 | `Makefile` | Build, test, install, lint targets |
 | `tests/regression/` | Regression test suite (54 tests) |

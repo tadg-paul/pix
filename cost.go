@@ -13,16 +13,7 @@ import (
 )
 
 func printCostUsage() {
-	fmt.Fprintln(os.Stderr, "Usage: pix cost [flags]")
-	fmt.Fprintln(os.Stderr, "")
-	fmt.Fprintln(os.Stderr, "Queries pricing for the configured model without generating an image.")
-	fmt.Fprintln(os.Stderr, "")
-	fmt.Fprintln(os.Stderr, "Flags:")
-	fmt.Fprintln(os.Stderr, "  -h, --help       Show this help message")
-	fmt.Fprintln(os.Stderr, "  --dry-run        Show what URLs would be queried without making API calls")
-	fmt.Fprintln(os.Stderr, "")
-	fmt.Fprintln(os.Stderr, "Global flags (place before subcommand):")
-	fmt.Fprintln(os.Stderr, "  -q, --quiet      Suppress output (exits zero with no stdout/stderr)")
+	printHelptext("cost")
 }
 
 // runCost handles the cost subcommand. globalQuiet is the value of the global

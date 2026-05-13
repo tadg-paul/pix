@@ -21,27 +21,7 @@ import (
 const maxRefImages = 3
 
 func printGenImgUsage(subcommandName string) {
-	fmt.Fprintln(os.Stderr, "Usage: pix generate [flags] [reference-images...] <output-file>")
-	fmt.Fprintln(os.Stderr, "")
-	fmt.Fprintln(os.Stderr, "Alias: gen")
-	fmt.Fprintln(os.Stderr, "")
-	fmt.Fprintln(os.Stderr, "Reads a text prompt from stdin and generates an image via the FAL API.")
-	fmt.Fprintln(os.Stderr, "")
-	fmt.Fprintln(os.Stderr, "If earlier positional arguments are existing image files, they are sent")
-	fmt.Fprintln(os.Stderr, "as references to the model's edit endpoint (max 3). The last positional")
-	fmt.Fprintln(os.Stderr, "is always the target output filename.")
-	fmt.Fprintln(os.Stderr, "")
-	fmt.Fprintln(os.Stderr, "Flags:")
-	fmt.Fprintln(os.Stderr, "  -h, --help          Show this help message")
-	fmt.Fprintln(os.Stderr, "  --dry-run           Show what would happen without calling the API")
-	fmt.Fprintln(os.Stderr, "  -p, --preview       Open the image after generation")
-	fmt.Fprintln(os.Stderr, "  --load-prompt       Pick a saved prompt via fzf (or configured picker)")
-	fmt.Fprintln(os.Stderr, "  --no-load-prompt    Disable load-prompt mode for this invocation")
-	fmt.Fprintln(os.Stderr, "  --pick-model        Pick a FAL model from the catalogue via the picker")
-	fmt.Fprintln(os.Stderr, "  --no-pick-model     Disable model-picker mode for this invocation")
-	fmt.Fprintln(os.Stderr, "")
-	fmt.Fprintln(os.Stderr, "Global flags (place before subcommand):")
-	fmt.Fprintln(os.Stderr, "  -q, --quiet         Suppress non-error output")
+	printHelptext("generate")
 }
 
 // runGenImg handles the generate subcommand (alias: gen). globalQuiet is the

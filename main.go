@@ -16,22 +16,7 @@ func main() {
 }
 
 func printUsage() {
-	fmt.Fprintln(os.Stderr, "Usage: pix [global flags] <subcommand> [subcommand args]")
-	fmt.Fprintln(os.Stderr, "")
-	fmt.Fprintln(os.Stderr, "A minimal CLI for generating images via the FAL API.")
-	fmt.Fprintln(os.Stderr, "")
-	fmt.Fprintln(os.Stderr, "Subcommands:")
-	fmt.Fprintln(os.Stderr, "  generate   Generate an image from a text prompt (stdin)")
-	fmt.Fprintln(os.Stderr, "             Accepts optional reference images as earlier positionals (max 3).")
-	fmt.Fprintln(os.Stderr, "             Alias: gen")
-	fmt.Fprintln(os.Stderr, "  cost       Query pricing for the configured model")
-	fmt.Fprintln(os.Stderr, "")
-	fmt.Fprintln(os.Stderr, "Global flags (placed before the subcommand):")
-	fmt.Fprintln(os.Stderr, "  -h, --help       Show this help message")
-	fmt.Fprintln(os.Stderr, "  --version        Show version")
-	fmt.Fprintln(os.Stderr, "  -q, --quiet      Suppress non-error output")
-	fmt.Fprintln(os.Stderr, "")
-	fmt.Fprintln(os.Stderr, "Run 'pix <subcommand> --help' for subcommand-specific usage.")
+	printHelptext("pix")
 }
 
 func run() int {

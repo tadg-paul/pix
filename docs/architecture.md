@@ -33,6 +33,8 @@ All code lives in package `main` at the project root.
 | `fal.go` | FAL API HTTP helpers (generation, pricing, historical estimate) |
 | `prompts.go` | `--load-prompt` flow -- enumerates saved-prompt files, invokes the configured picker, assembles base + optional appended text |
 | `models.go` | `--pick-model` flow -- fetches FAL `/v1/models` (image categories), invokes the configured picker, returns the selected `endpoint_id` |
+| `helptext.go` | Loads embedded `docs/helptext/*.md` files via `//go:embed` and writes them to stderr on `--help` |
+| `docs/helptext/*.md` | Source of truth for `--help` output: one file per subcommand (`pix.md`, `generate.md`, `cost.md`). Embedded at compile time so the binary stays a single artefact, while the text lives alongside the rest of the project documentation. |
 
 ### Subcommands
 
