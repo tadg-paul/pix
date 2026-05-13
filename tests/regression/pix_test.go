@@ -1968,16 +1968,18 @@ func writePromptFile(t *testing.T, dir, name, content string) string {
 	return path
 }
 
-// loadPromptConfigYAML builds a config.yaml fragment for load-prompt mode.
+// loadPromptConfigYAML builds a config.yaml fragment for load-prompt mode
+// using the `interactive:` parent block.
 func loadPromptConfigYAML(model, promptsPath, picker string, always bool) string {
 	cfg := "model: " + model + "\n"
-	cfg += "load-prompt:\n"
-	cfg += "  path: " + promptsPath + "\n"
+	cfg += "interactive:\n"
 	if picker != "" {
 		cfg += "  picker: " + picker + "\n"
 	}
+	cfg += "  load-prompt:\n"
+	cfg += "    path: " + promptsPath + "\n"
 	if always {
-		cfg += "  always: true\n"
+		cfg += "    always: true\n"
 	}
 	return cfg
 }
@@ -2170,7 +2172,7 @@ func TestLoadPrompt_no_section_errors_RT8_10(t *testing.T) {
 // RT-8.11: --load-prompt with load-prompt present but path empty exits non-zero.
 func TestLoadPrompt_empty_path_errors_RT8_11(t *testing.T) {
 	bin := buildBinary(t)
-	cfg := "model: fal-ai/grok-2-aurora\nload-prompt:\n  picker: head -n 1\n"
+	cfg := "model: fal-ai/grok-2-aurora\ninteractive:\n  picker: head -n 1\n  load-prompt: {}\n"
 	binPath := setupEnvWithConfig(t, bin, "FAL_KEY=test\n", cfg)
 
 	outFile := filepath.Join(t.TempDir(), "out.png")
@@ -2434,7 +2436,7 @@ func TestLoadPrompt_picker_defaults_to_fzf_RT8_22(t *testing.T) {
 
 	// Picker omitted -> default 'fzf'. fzf is presumably not on PATH in this test env;
 	// the error should mention 'fzf' rather than 'picker not configured'.
-	cfg := "model: fal-ai/grok-2-aurora\nload-prompt:\n  path: " + promptsDir + "\n"
+	cfg := "model: fal-ai/grok-2-aurora\ninteractive:\n  load-prompt:\n    path: " + promptsDir + "\n"
 	binPath := setupEnvWithConfig(t, bin, "FAL_KEY=test\n", cfg)
 
 	outFile := filepath.Join(t.TempDir(), "out.png")
@@ -2997,11 +2999,12 @@ func fakeModelsResponse(endpointIDs []string, category string) string {
 	return string(b)
 }
 
-// modelPickerConfigYAML builds a config that exercises model-picker.
+// modelPickerConfigYAML builds a config that exercises model-picker
+// using the `interactive:` parent block.
 func modelPickerConfigYAML(model, picker string, always bool) string {
-	cfg := "model: " + model + "\npicker: " + picker + "\n"
+	cfg := "model: " + model + "\ninteractive:\n  picker: " + picker + "\n"
 	if always {
-		cfg += "model-picker:\n  always: true\n"
+		cfg += "  model-picker:\n    always: true\n"
 	}
 	return cfg
 }
@@ -3259,10 +3262,10 @@ func TestModelPicker_no_flag_overrides_always_RT10_9(t *testing.T) {
 // RT-10.10: top-level `picker:` config drives both load-prompt and model-pick.
 func TestModelPicker_top_level_picker_RT10_10(t *testing.T) {
 	bin := buildBinary(t)
-	// Top-level picker; no `load-prompt.picker` key at all.
+	// interactive.picker drives both flows.
 	promptsDir := t.TempDir()
 	writePromptFile(t, promptsDir, "p1.md", "from-saved")
-	cfg := "model: fal-ai/grok-2-aurora\npicker: head -n 1\nload-prompt:\n  path: " + promptsDir + "\n"
+	cfg := "model: fal-ai/grok-2-aurora\ninteractive:\n  picker: head -n 1\n  load-prompt:\n    path: " + promptsDir + "\n"
 	binPath := setupEnvWithConfig(t, bin, "FAL_KEY=test\n", cfg)
 
 	imageServer := newImageServer(t, fakeImagePNG, "image/png")

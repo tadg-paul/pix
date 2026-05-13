@@ -138,7 +138,7 @@ func runGenImg(args []string, globalQuiet bool, subcommandName string) int {
 		return 1
 	}
 
-	useLoadPrompt := !noLoadPromptFlag && (loadPromptFlag || cfg.LoadPrompt.Always)
+	useLoadPrompt := !noLoadPromptFlag && (loadPromptFlag || cfg.Interactive.LoadPrompt.Always)
 
 	var prompt string
 	if useLoadPrompt && isStdinTTY() {
@@ -178,7 +178,7 @@ func runGenImg(args []string, globalQuiet bool, subcommandName string) int {
 	// the existing /edit suffix when refs are present. If --pick-model (or
 	// model-picker.always) is active, prompt the user to select from FAL's
 	// /v1/models catalogue and use the selected endpoint_id as-is.
-	usePickModel := !noPickModelFlag && (pickModelFlag || cfg.ModelPicker.Always)
+	usePickModel := !noPickModelFlag && (pickModelFlag || cfg.Interactive.ModelPicker.Always)
 	pickedEndpoint := ""
 	if usePickModel && isStdinTTY() {
 		// Picker only runs in an interactive terminal. Piped/redirected stdin

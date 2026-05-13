@@ -122,18 +122,19 @@ api-keys:
 # Custom preview command (optional -- defaults to open/xdg-open/start)
 # preview-command: chafa
 
-# Picker -- shared by --load-prompt and --pick-model (default: fzf)
-# picker: fzf
-
-# Saved prompts (optional -- only required when --load-prompt is used)
-# load-prompt:
-#   path: ~/.config/pix/prompts    # directory of saved prompt files
-#   always: false                  # if true, --load-prompt is implicit on every generate invocation
-
-# Model picker (optional -- enable always-on selection from the FAL catalogue)
-# model-picker:
-#   always: false                  # if true, --pick-model is implicit on every generate invocation
+# Interactive-only settings: these apply when stdin is a TTY (a user is sitting
+# at the keyboard). Piped or redirected invocations silently bypass everything
+# in this block -- pix stays scriptable.
+# interactive:
+#   picker: fzf                          # shared by --load-prompt and --pick-model (default: fzf)
+#   load-prompt:
+#     path: ~/.config/pix/prompts        # directory of saved prompt files
+#     always: false                      # if true, --load-prompt is implicit on every gen
+#   model-picker:
+#     always: false                      # if true, --pick-model is implicit on every gen
 ```
+
+> **Config migration (2026-05-13):** the previous flat layout (`picker:`, `load-prompt:`, `model-picker:` at top level) is gone. Move those keys under a single `interactive:` parent block as shown above. The reorganization makes the TTY-only nature of these settings clear at-a-glance.
 
 ### Saved prompts
 

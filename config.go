@@ -20,7 +20,6 @@ type apiKeyConfig struct {
 
 type loadPromptConfig struct {
 	Path   string `yaml:"path"`
-	Picker string `yaml:"picker"` // deprecated -- use top-level `picker:` instead; kept so old configs still parse
 	Always bool   `yaml:"always"`
 }
 
@@ -28,23 +27,25 @@ type modelPickerConfig struct {
 	Always bool `yaml:"always"`
 }
 
+// interactiveConfig holds settings that only apply when stdin is a TTY.
+// Piped or redirected invocations silently bypass every option in this block.
+type interactiveConfig struct {
+	Picker      string            `yaml:"picker"`
+	LoadPrompt  loadPromptConfig  `yaml:"load-prompt"`
+	ModelPicker modelPickerConfig `yaml:"model-picker"`
+}
+
 type config struct {
 	Model          string                  `yaml:"model"`
 	APIKeys        map[string]apiKeyConfig `yaml:"api-keys"`
 	PreviewCommand string                  `yaml:"preview-command"`
-	Picker         string                  `yaml:"picker"` // top-level: shared by load-prompt and model-pick (default "fzf")
-	LoadPrompt     loadPromptConfig        `yaml:"load-prompt"`
-	ModelPicker    modelPickerConfig       `yaml:"model-picker"`
+	Interactive    interactiveConfig       `yaml:"interactive"`
 }
 
-// effectivePicker returns the picker command to use, preferring the top-level
-// `picker:` key, then the (deprecated) `load-prompt.picker`, then the default `fzf`.
+// effectivePicker returns the picker command, defaulting to fzf.
 func effectivePicker(cfg *config) string {
-	if cfg.Picker != "" {
-		return cfg.Picker
-	}
-	if cfg.LoadPrompt.Picker != "" {
-		return cfg.LoadPrompt.Picker
+	if cfg.Interactive.Picker != "" {
+		return cfg.Interactive.Picker
 	}
 	return "fzf"
 }

@@ -21,7 +21,7 @@ type loadPromptResult struct {
 }
 
 func runLoadPromptFlow(cfg *config, globalQuiet bool) (*loadPromptResult, error) {
-	lp := cfg.LoadPrompt
+	lp := cfg.Interactive.LoadPrompt
 
 	if lp.Path == "" {
 		return nil, fmt.Errorf("load-prompt.path is not configured in config.yaml")
