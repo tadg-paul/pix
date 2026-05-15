@@ -1470,36 +1470,18 @@ func TestPix_global_quiet_correct_position_RT5_22(t *testing.T) {
 	}
 }
 
-// RT-5.23: pix gen-img --quiet out errors (global flag in wrong position).
+// RT-5.23: 🚫 REMOVED -- superseded by issue #11.
+// Original: --quiet placed after the subcommand was an error.
+// New: any recognised flag is accepted in any position (see RT-11.2).
 func TestPix_global_quiet_wrong_position_RT5_23(t *testing.T) {
-	bin := buildBinary(t)
-	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
-
-	outFile := filepath.Join(t.TempDir(), "out.png")
-	_, stderr, exitCode := runBinary(t, binPath, []string{"gen", "--quiet", outFile}, "a cat", nil)
-
-	if exitCode == 0 {
-		t.Errorf("Expected non-zero exit for misplaced global flag")
-	}
-	if stderr == "" {
-		t.Errorf("Expected error message about flag placement")
-	}
+	t.Skip("Superseded by issue #11; --quiet after the subcommand now succeeds (RT-11.2)")
 }
 
-// RT-5.24: pix --dry-run gen-img out errors (subcommand flag in global position).
+// RT-5.24: 🚫 REMOVED -- superseded by issue #11.
+// Original: --dry-run placed before the subcommand was an error.
+// New: any recognised flag is accepted in any position (see RT-11.4).
 func TestPix_subcommand_flag_wrong_position_RT5_24(t *testing.T) {
-	bin := buildBinary(t)
-	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
-
-	outFile := filepath.Join(t.TempDir(), "out.png")
-	_, stderr, exitCode := runBinary(t, binPath, []string{"--dry-run", "gen", outFile}, "a cat", nil)
-
-	if exitCode == 0 {
-		t.Errorf("Expected non-zero exit for misplaced subcommand flag")
-	}
-	if stderr == "" {
-		t.Errorf("Expected error message about flag placement")
-	}
+	t.Skip("Superseded by issue #11; --dry-run before the subcommand now succeeds (RT-11.4)")
 }
 
 // RT-5.25: pix --help --quiet errors (--help mutual exclusion at top level).
@@ -1958,11 +1940,11 @@ func loadPromptConfigYAML(model, promptsPath, picker string, always bool) string
 	if picker != "" {
 		cfg += "  picker: " + picker + "\n"
 	}
+	if always {
+		cfg += "  prompt-picker:\n    always: true\n"
+	}
 	cfg += "  load-prompt:\n"
 	cfg += "    path: " + promptsPath + "\n"
-	if always {
-		cfg += "    always: true\n"
-	}
 	return cfg
 }
 
@@ -3465,4 +3447,769 @@ echo "$first"
 	}
 
 	_ = picker // silence unused-var on the alternative-approach scaffolding above
+}
+
+// --- Position-irrelevant flag parsing tests (issue #11) ---
+
+// RT-11.1: --quiet before subcommand is accepted (status-quo position).
+func TestFlagPosition_quiet_before_subcommand_RT11_1(t *testing.T) {
+	bin := buildBinary(t)
+	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
+
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPI(t, successHandler(t, imageServer, nil), nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	_, stderr, exitCode := runBinary(t, binPath, []string{"--quiet", "gen", outFile}, "a cat",
+		[]string{"FAL_BASE_URL=" + server.URL})
+
+	if exitCode != 0 {
+		t.Fatalf("Expected exit 0 with --quiet before subcommand, got %d; stderr: %s", exitCode, stderr)
+	}
+	if strings.Contains(stderr, "Cost:") {
+		t.Errorf("Expected --quiet to suppress cost output; stderr: %q", stderr)
+	}
+}
+
+// RT-11.2: --quiet between subcommand and positional is accepted.
+func TestFlagPosition_quiet_after_subcommand_RT11_2(t *testing.T) {
+	bin := buildBinary(t)
+	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
+
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPI(t, successHandler(t, imageServer, nil), nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	_, stderr, exitCode := runBinary(t, binPath, []string{"gen", "--quiet", outFile}, "a cat",
+		[]string{"FAL_BASE_URL=" + server.URL})
+
+	if exitCode != 0 {
+		t.Fatalf("Expected exit 0 with --quiet after subcommand, got %d; stderr: %s", exitCode, stderr)
+	}
+	if strings.Contains(stderr, "Cost:") {
+		t.Errorf("Expected --quiet to suppress cost output; stderr: %q", stderr)
+	}
+}
+
+// RT-11.3: --quiet trailing the entire command is accepted.
+func TestFlagPosition_quiet_trailing_RT11_3(t *testing.T) {
+	bin := buildBinary(t)
+	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
+
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPI(t, successHandler(t, imageServer, nil), nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	_, stderr, exitCode := runBinary(t, binPath, []string{"gen", outFile, "--quiet"}, "a cat",
+		[]string{"FAL_BASE_URL=" + server.URL})
+
+	if exitCode != 0 {
+		t.Fatalf("Expected exit 0 with --quiet trailing, got %d; stderr: %s", exitCode, stderr)
+	}
+	if strings.Contains(stderr, "Cost:") {
+		t.Errorf("Expected --quiet to suppress cost output; stderr: %q", stderr)
+	}
+}
+
+// RT-11.4: --dry-run before subcommand is accepted (was previously rejected).
+func TestFlagPosition_dryrun_before_subcommand_RT11_4(t *testing.T) {
+	bin := buildBinary(t)
+	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	_, stderr, exitCode := runBinary(t, binPath, []string{"--dry-run", "gen", outFile}, "a cat", nil)
+
+	if exitCode != 0 {
+		t.Fatalf("Expected exit 0 for --dry-run before gen, got %d; stderr: %s", exitCode, stderr)
+	}
+	if !strings.Contains(stderr, "dry run") && !strings.Contains(stderr, "Output:") {
+		t.Errorf("Expected dry-run output on stderr, got: %q", stderr)
+	}
+}
+
+// RT-11.5: --no-load-prompt before subcommand is accepted (was previously rejected).
+func TestFlagPosition_noloadprompt_before_subcommand_RT11_5(t *testing.T) {
+	bin := buildBinary(t)
+	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
+
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPI(t, successHandler(t, imageServer, nil), nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	_, stderr, exitCode := runBinary(t, binPath, []string{"--no-load-prompt", "gen", outFile}, "a cat",
+		[]string{"FAL_BASE_URL=" + server.URL})
+
+	if exitCode != 0 {
+		t.Fatalf("Expected exit 0 for --no-load-prompt before gen, got %d; stderr: %s", exitCode, stderr)
+	}
+}
+
+// RT-11.6: --dry-run between subcommand and positional is accepted (status-quo position).
+func TestFlagPosition_dryrun_after_subcommand_RT11_6(t *testing.T) {
+	bin := buildBinary(t)
+	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	_, stderr, exitCode := runBinary(t, binPath, []string{"gen", "--dry-run", outFile}, "a cat", nil)
+
+	if exitCode != 0 {
+		t.Fatalf("Expected exit 0 for --dry-run after gen, got %d; stderr: %s", exitCode, stderr)
+	}
+	if !strings.Contains(stderr, "dry run") && !strings.Contains(stderr, "Output:") {
+		t.Errorf("Expected dry-run output on stderr, got: %q", stderr)
+	}
+}
+
+// RT-11.7: --dry-run trailing the command is accepted.
+func TestFlagPosition_dryrun_trailing_RT11_7(t *testing.T) {
+	bin := buildBinary(t)
+	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	_, stderr, exitCode := runBinary(t, binPath, []string{"gen", outFile, "--dry-run"}, "a cat", nil)
+
+	if exitCode != 0 {
+		t.Fatalf("Expected exit 0 for --dry-run trailing, got %d; stderr: %s", exitCode, stderr)
+	}
+	if !strings.Contains(stderr, "dry run") && !strings.Contains(stderr, "Output:") {
+		t.Errorf("Expected dry-run output on stderr, got: %q", stderr)
+	}
+}
+
+// RT-11.8: pix --quiet generate out.png dispatches to generate.
+func TestFlagPosition_dispatch_generate_with_flag_RT11_8(t *testing.T) {
+	bin := buildBinary(t)
+	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
+
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPI(t, successHandler(t, imageServer, nil), nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	_, _, exitCode := runBinary(t, binPath, []string{"--quiet", "generate", outFile}, "a cat",
+		[]string{"FAL_BASE_URL=" + server.URL})
+
+	if exitCode != 0 {
+		t.Errorf("Expected exit 0 dispatching to generate, got %d", exitCode)
+	}
+	if _, err := os.Stat(outFile); err != nil {
+		t.Errorf("Expected image written by generate handler: %v", err)
+	}
+}
+
+// RT-11.9: pix --dry-run cost dispatches to cost.
+func TestFlagPosition_dispatch_cost_with_flag_RT11_9(t *testing.T) {
+	bin := buildBinary(t)
+	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
+
+	_, stderr, exitCode := runBinary(t, binPath, []string{"--dry-run", "cost"}, "", nil)
+
+	if exitCode != 0 {
+		t.Errorf("Expected exit 0 for --dry-run cost, got %d", exitCode)
+	}
+	if !strings.Contains(strings.ToLower(stderr), "pricing") && !strings.Contains(stderr, "Would GET") {
+		t.Errorf("Expected cost dry-run output, got: %q", stderr)
+	}
+}
+
+// RT-11.10: pix --bogus gen out.png exits non-zero, error names the flag, no position language.
+func TestFlagPosition_unknown_flag_before_RT11_10(t *testing.T) {
+	bin := buildBinary(t)
+	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	_, stderr, exitCode := runBinary(t, binPath, []string{"--bogus-xyzzy", "gen", outFile}, "a cat", nil)
+
+	if exitCode == 0 {
+		t.Fatalf("Expected non-zero exit for unknown flag")
+	}
+	if !strings.Contains(stderr, "bogus-xyzzy") {
+		t.Errorf("Expected stderr to name the unknown flag, got: %q", stderr)
+	}
+	lower := strings.ToLower(stderr)
+	if strings.Contains(lower, "must be placed") || strings.Contains(lower, "is a global flag") {
+		t.Errorf("Expected error not to reference position rules, got: %q", stderr)
+	}
+}
+
+// RT-11.11: pix gen --bogus out.png exits non-zero, error names the flag.
+func TestFlagPosition_unknown_flag_after_RT11_11(t *testing.T) {
+	bin := buildBinary(t)
+	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	_, stderr, exitCode := runBinary(t, binPath, []string{"gen", "--bogus-xyzzy", outFile}, "a cat", nil)
+
+	if exitCode == 0 {
+		t.Fatalf("Expected non-zero exit for unknown flag")
+	}
+	if !strings.Contains(stderr, "bogus-xyzzy") {
+		t.Errorf("Expected stderr to name the unknown flag, got: %q", stderr)
+	}
+}
+
+// RT-11.12: pix --help gen exits non-zero (--help mutually exclusive with subcommand arg).
+func TestFlagPosition_help_with_subcommand_arg_RT11_12(t *testing.T) {
+	bin := buildBinary(t)
+	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
+
+	_, stderr, exitCode := runBinary(t, binPath, []string{"--help", "gen"}, "", nil)
+
+	if exitCode == 0 {
+		t.Errorf("Expected non-zero exit for --help with subcommand argument")
+	}
+	if !strings.Contains(strings.ToLower(stderr), "help cannot be combined") {
+		t.Errorf("Expected mutual-exclusion error, got: %q", stderr)
+	}
+}
+
+// RT-11.13: pix gen --help out.png exits non-zero (--help mutually exclusive).
+func TestFlagPosition_help_with_other_args_RT11_13(t *testing.T) {
+	bin := buildBinary(t)
+	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
+
+	_, stderr, exitCode := runBinary(t, binPath, []string{"gen", "--help", "out.png"}, "", nil)
+
+	if exitCode == 0 {
+		t.Errorf("Expected non-zero exit for --help with positional argument")
+	}
+	if !strings.Contains(strings.ToLower(stderr), "help cannot be combined") {
+		t.Errorf("Expected mutual-exclusion error, got: %q", stderr)
+	}
+}
+
+// RT-11.14: pix --help output matches docs/helptext/pix.md content byte-for-byte.
+func TestFlagPosition_top_level_help_matches_file_RT11_14(t *testing.T) {
+	bin := buildBinary(t)
+	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
+
+	expected, err := os.ReadFile(filepath.Join(projectRoot(), "docs", "helptext", "pix.md"))
+	if err != nil {
+		t.Fatalf("Failed to read docs/helptext/pix.md: %v", err)
+	}
+
+	_, stderr, exitCode := runBinary(t, binPath, []string{"--help"}, "", nil)
+
+	if exitCode != 0 {
+		t.Fatalf("Expected exit 0 for --help, got %d", exitCode)
+	}
+	if stderr != string(expected) {
+		t.Errorf("Expected pix --help output to match docs/helptext/pix.md verbatim.\nGot:\n%s\nWant:\n%s", stderr, string(expected))
+	}
+}
+
+// RT-11.15: pix gen --help output matches docs/helptext/generate.md content.
+func TestFlagPosition_generate_help_matches_file_RT11_15(t *testing.T) {
+	bin := buildBinary(t)
+	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
+
+	expected, err := os.ReadFile(filepath.Join(projectRoot(), "docs", "helptext", "generate.md"))
+	if err != nil {
+		t.Fatalf("Failed to read docs/helptext/generate.md: %v", err)
+	}
+
+	_, stderr, exitCode := runBinary(t, binPath, []string{"gen", "--help"}, "", nil)
+
+	if exitCode != 0 {
+		t.Fatalf("Expected exit 0 for gen --help, got %d", exitCode)
+	}
+	if stderr != string(expected) {
+		t.Errorf("Expected pix gen --help output to match docs/helptext/generate.md verbatim.\nGot:\n%s\nWant:\n%s", stderr, string(expected))
+	}
+}
+
+// RT-11.16: pix cost --help output matches docs/helptext/cost.md content.
+func TestFlagPosition_cost_help_matches_file_RT11_16(t *testing.T) {
+	bin := buildBinary(t)
+	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
+
+	expected, err := os.ReadFile(filepath.Join(projectRoot(), "docs", "helptext", "cost.md"))
+	if err != nil {
+		t.Fatalf("Failed to read docs/helptext/cost.md: %v", err)
+	}
+
+	_, stderr, exitCode := runBinary(t, binPath, []string{"cost", "--help"}, "", nil)
+
+	if exitCode != 0 {
+		t.Fatalf("Expected exit 0 for cost --help, got %d", exitCode)
+	}
+	if stderr != string(expected) {
+		t.Errorf("Expected pix cost --help output to match docs/helptext/cost.md verbatim.\nGot:\n%s\nWant:\n%s", stderr, string(expected))
+	}
+}
+
+// RT-11.17: load-prompt.filter results in --query=<value> appended to the fzf
+// invocation. Approach: place a stub named 'fzf' on PATH that logs argv, then
+// assert --query=<filter> appears.
+func TestFlagPosition_load_prompt_filter_fzf_query_RT11_17(t *testing.T) {
+	bin := buildBinary(t)
+	promptsDir := t.TempDir()
+	writePromptFile(t, promptsDir, "p1.md", "filtered prompt")
+
+	// Create a binary in a tempdir literally named 'fzf' that logs argv and picks first.
+	pickerBinDir := t.TempDir()
+	pickerScript := filepath.Join(pickerBinDir, "fzf")
+	argvLog := filepath.Join(pickerBinDir, "argv.log")
+	body := "#!/bin/sh\nprintf '%s\\n' \"$@\" > " + argvLog + "\nhead -n 1\n"
+	if err := os.WriteFile(pickerScript, []byte(body), 0755); err != nil {
+		t.Fatalf("failed to write fzf stub: %v", err)
+	}
+
+	cfg := "model: fal-ai/grok-2-aurora\ninteractive:\n  picker: fzf\n" +
+		"  prompt-picker:\n    filter: image\n" +
+		"  load-prompt:\n    path: " + promptsDir + "\n"
+	binPath := setupEnvWithConfig(t, bin, "FAL_KEY=test\n", cfg)
+
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPI(t, successHandler(t, imageServer, nil), nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	// PATH override puts our stub fzf first.
+	_, stderr, exitCode := runBinary(t, binPath, []string{"--load-prompt", "gen", outFile}, "\n",
+		ttyEnv("FAL_BASE_URL="+server.URL, "PATH="+pickerBinDir+":/usr/bin:/bin"))
+
+	if exitCode != 0 {
+		t.Fatalf("expected exit 0, got %d; stderr: %s", exitCode, stderr)
+	}
+	logged, err := os.ReadFile(argvLog)
+	if err != nil {
+		t.Fatalf("failed to read picker argv log: %v", err)
+	}
+	if !strings.Contains(string(logged), "--query=") || !strings.Contains(string(logged), "image") {
+		t.Errorf("expected --query=...image... in fzf args, got: %q", string(logged))
+	}
+}
+
+// RT-11.18: model-picker.filter is passed to the picker as --query=<value>.
+func TestFlagPosition_model_picker_filter_fzf_query_RT11_18(t *testing.T) {
+	bin := buildBinary(t)
+
+	pickerBinDir := t.TempDir()
+	pickerScript := filepath.Join(pickerBinDir, "fzf")
+	argvLog := filepath.Join(pickerBinDir, "argv.log")
+	body := "#!/bin/sh\nprintf '%s\\n' \"$@\" > " + argvLog + "\nhead -n 1\n"
+	if err := os.WriteFile(pickerScript, []byte(body), 0755); err != nil {
+		t.Fatalf("failed to write fzf stub: %v", err)
+	}
+
+	cfg := "model: fal-ai/grok-2-aurora\ninteractive:\n  picker: fzf\n" +
+		"  model-picker:\n    filter: flux\n"
+	binPath := setupEnvWithConfig(t, bin, "FAL_KEY=test\n", cfg)
+
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPIWithModels(t,
+		successHandler(t, imageServer, nil), nil,
+		func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(fakeModelsResponse([]string{"fal-ai/flux/dev", "fal-ai/other"}, "text-to-image")))
+		})
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	_, stderr, exitCode := runBinary(t, binPath, []string{"gen", "--pick-model", outFile}, "a prompt",
+		ttyEnv("FAL_BASE_URL="+server.URL, "PATH="+pickerBinDir+":/usr/bin:/bin"))
+
+	if exitCode != 0 {
+		t.Fatalf("expected exit 0, got %d; stderr: %s", exitCode, stderr)
+	}
+	logged, err := os.ReadFile(argvLog)
+	if err != nil {
+		t.Fatalf("failed to read picker argv log: %v", err)
+	}
+	if !strings.Contains(string(logged), "--query=") || !strings.Contains(string(logged), "flux") {
+		t.Errorf("expected --query=...flux... in fzf args, got: %q", string(logged))
+	}
+}
+
+// --- interactive config refactor + preselect (issue #12) ---
+
+// fzfArgvStubDir writes a stub binary literally named 'fzf' that logs argv to
+// argv.log and emits the first stdin line. Returns the bin dir (for PATH) and
+// argv.log path.
+func fzfArgvStubDir(t *testing.T) (binDir, argvLog string) {
+	t.Helper()
+	binDir = t.TempDir()
+	argvLog = filepath.Join(binDir, "argv.log")
+	script := filepath.Join(binDir, "fzf")
+	body := "#!/bin/sh\nprintf '%s\\n' \"$@\" > " + argvLog + "\nhead -n 1\n"
+	if err := os.WriteFile(script, []byte(body), 0755); err != nil {
+		t.Fatalf("write fzf stub: %v", err)
+	}
+	return binDir, argvLog
+}
+
+// fzfStdinLoggerDir writes a stub 'fzf' that logs its stdin (the candidate
+// list) to stdin.log and emits the first line. Returns bin dir and log path.
+func fzfStdinLoggerDir(t *testing.T) (binDir, stdinLog string) {
+	t.Helper()
+	binDir = t.TempDir()
+	stdinLog = filepath.Join(binDir, "stdin.log")
+	script := filepath.Join(binDir, "fzf")
+	body := "#!/bin/sh\ntee " + stdinLog + " | head -n 1\n"
+	if err := os.WriteFile(script, []byte(body), 0755); err != nil {
+		t.Fatalf("write fzf stub: %v", err)
+	}
+	return binDir, stdinLog
+}
+
+// RT-12.1: config with interactive.prompt-picker.always:true triggers the picker.
+func TestInteractive_promptpicker_always_triggers_RT12_1(t *testing.T) {
+	bin := buildBinary(t)
+	promptsDir := t.TempDir()
+	writePromptFile(t, promptsDir, "saved.md", "from-prompt-picker-always")
+
+	cfg := "model: fal-ai/grok-2-aurora\ninteractive:\n  picker: head -n 1\n" +
+		"  prompt-picker:\n    always: true\n" +
+		"  load-prompt:\n    path: " + promptsDir + "\n"
+	binPath := setupEnvWithConfig(t, bin, "FAL_KEY=test\n", cfg)
+
+	var capturedBody string
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPI(t, successHandler(t, imageServer, &capturedBody), nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	_, stderr, exitCode := runBinary(t, binPath, []string{"gen", outFile}, "\n",
+		ttyEnv("FAL_BASE_URL="+server.URL))
+
+	if exitCode != 0 {
+		t.Fatalf("expected exit 0, got %d; stderr: %s", exitCode, stderr)
+	}
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(capturedBody), &parsed); err != nil {
+		t.Fatalf("parse body: %v", err)
+	}
+	got, _ := parsed["prompt"].(string)
+	if got != "from-prompt-picker-always" {
+		t.Errorf("expected prompt from saved file (picker fired); got prompt: %q", got)
+	}
+}
+
+// RT-12.2: omitting interactive.prompt-picker entirely leaves always:false.
+func TestInteractive_promptpicker_default_off_RT12_2(t *testing.T) {
+	bin := buildBinary(t)
+	promptsDir := t.TempDir()
+	writePromptFile(t, promptsDir, "saved.md", "should-not-fire")
+
+	// No prompt-picker block at all.
+	cfg := "model: fal-ai/grok-2-aurora\ninteractive:\n  picker: head -n 1\n" +
+		"  load-prompt:\n    path: " + promptsDir + "\n"
+	binPath := setupEnvWithConfig(t, bin, "FAL_KEY=test\n", cfg)
+
+	var capturedBody string
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPI(t, successHandler(t, imageServer, &capturedBody), nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	runBinary(t, binPath, []string{"gen", outFile}, "user typed prompt",
+		ttyEnv("FAL_BASE_URL="+server.URL))
+
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(capturedBody), &parsed); err != nil {
+		t.Fatalf("parse body: %v", err)
+	}
+	got, _ := parsed["prompt"].(string)
+	if got != "user typed prompt" {
+		t.Errorf("expected stdin prompt (picker not fired); got: %q", got)
+	}
+}
+
+// RT-12.3: model-picker.preselect parses (no crash) with a valid model id.
+func TestInteractive_modelpicker_preselect_parses_RT12_3(t *testing.T) {
+	bin := buildBinary(t)
+	cfg := "model: fal-ai/grok-2-aurora\ninteractive:\n  picker: head -n 1\n" +
+		"  model-picker:\n    preselect: fal-ai/preselected\n"
+	binPath := setupEnvWithConfig(t, bin, "FAL_KEY=test\n", cfg)
+
+	// cost --dry-run exercises config parsing without triggering FAL calls.
+	_, stderr, exitCode := runBinary(t, binPath, []string{"cost", "--dry-run"}, "", nil)
+
+	if exitCode != 0 {
+		t.Fatalf("expected exit 0 for cost --dry-run with preselect set, got %d; stderr: %s", exitCode, stderr)
+	}
+}
+
+// RT-12.4: omitting model-picker.preselect leaves it empty (default).
+func TestInteractive_modelpicker_preselect_default_RT12_4(t *testing.T) {
+	bin := buildBinary(t)
+	cfg := "model: fal-ai/grok-2-aurora\ninteractive:\n  picker: head -n 1\n"
+	binPath := setupEnvWithConfig(t, bin, "FAL_KEY=test\n", cfg)
+
+	// As above: confirm config parses cleanly with no preselect key.
+	_, stderr, exitCode := runBinary(t, binPath, []string{"cost", "--dry-run"}, "", nil)
+	if exitCode != 0 {
+		t.Fatalf("expected exit 0, got %d; stderr: %s", exitCode, stderr)
+	}
+}
+
+// RT-12.5: prompt-picker.always:true + TTY -> picker fires (covered by RT-12.1).
+// Adding an explicit-TTY assertion here for completeness/multi-condition coverage.
+func TestInteractive_promptpicker_always_tty_RT12_5(t *testing.T) {
+	bin := buildBinary(t)
+	promptsDir := t.TempDir()
+	writePromptFile(t, promptsDir, "tty.md", "from-tty-path")
+
+	cfg := "model: fal-ai/grok-2-aurora\ninteractive:\n  picker: head -n 1\n" +
+		"  prompt-picker:\n    always: true\n" +
+		"  load-prompt:\n    path: " + promptsDir + "\n"
+	binPath := setupEnvWithConfig(t, bin, "FAL_KEY=test\n", cfg)
+
+	var capturedBody string
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPI(t, successHandler(t, imageServer, &capturedBody), nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	runBinary(t, binPath, []string{"gen", outFile}, "\n",
+		ttyEnv("FAL_BASE_URL="+server.URL))
+
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(capturedBody), &parsed); err != nil {
+		t.Fatalf("parse body: %v", err)
+	}
+	got, _ := parsed["prompt"].(string)
+	if got != "from-tty-path" {
+		t.Errorf("expected saved-prompt under TTY, got: %q", got)
+	}
+}
+
+// RT-12.6: prompt-picker.always:true + piped stdin -> picker bypassed; stdin used.
+func TestInteractive_promptpicker_always_piped_bypass_RT12_6(t *testing.T) {
+	bin := buildBinary(t)
+	promptsDir := t.TempDir()
+	writePromptFile(t, promptsDir, "saved.md", "should-not-fire")
+
+	cfg := "model: fal-ai/grok-2-aurora\ninteractive:\n  picker: head -n 1\n" +
+		"  prompt-picker:\n    always: true\n" +
+		"  load-prompt:\n    path: " + promptsDir + "\n"
+	binPath := setupEnvWithConfig(t, bin, "FAL_KEY=test\n", cfg)
+
+	var capturedBody string
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPI(t, successHandler(t, imageServer, &capturedBody), nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	// No PIX_TEST_TTY -> stdin is a pipe, picker should be silently bypassed.
+	runBinary(t, binPath, []string{"gen", outFile}, "piped wins",
+		[]string{"FAL_BASE_URL=" + server.URL})
+
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(capturedBody), &parsed); err != nil {
+		t.Fatalf("parse body: %v", err)
+	}
+	got, _ := parsed["prompt"].(string)
+	if got != "piped wins" {
+		t.Errorf("expected piped stdin to win over always:true; got: %q", got)
+	}
+}
+
+// RT-12.7: prompt-picker.filter passes --query to fzf.
+func TestInteractive_promptpicker_filter_passes_RT12_7(t *testing.T) {
+	bin := buildBinary(t)
+	binDir, argvLog := fzfArgvStubDir(t)
+
+	promptsDir := t.TempDir()
+	writePromptFile(t, promptsDir, "p1.md", "x")
+
+	cfg := "model: fal-ai/grok-2-aurora\ninteractive:\n  picker: fzf\n" +
+		"  prompt-picker:\n    filter: image\n" +
+		"  load-prompt:\n    path: " + promptsDir + "\n"
+	binPath := setupEnvWithConfig(t, bin, "FAL_KEY=test\n", cfg)
+
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPI(t, successHandler(t, imageServer, nil), nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	runBinary(t, binPath, []string{"gen", "--load-prompt", outFile}, "\n",
+		ttyEnv("FAL_BASE_URL="+server.URL, "PATH="+binDir+":/usr/bin:/bin"))
+
+	logged, err := os.ReadFile(argvLog)
+	if err != nil {
+		t.Fatalf("read argv log: %v", err)
+	}
+	if !strings.Contains(string(logged), "--query=") || !strings.Contains(string(logged), "image") {
+		t.Errorf("expected --query=image in fzf args, got: %q", string(logged))
+	}
+}
+
+// RT-12.8: prompt-picker.filter empty -> no --query argument.
+func TestInteractive_promptpicker_filter_empty_no_query_RT12_8(t *testing.T) {
+	bin := buildBinary(t)
+	binDir, argvLog := fzfArgvStubDir(t)
+
+	promptsDir := t.TempDir()
+	writePromptFile(t, promptsDir, "p1.md", "x")
+
+	// prompt-picker block present but no filter.
+	cfg := "model: fal-ai/grok-2-aurora\ninteractive:\n  picker: fzf\n" +
+		"  prompt-picker: {}\n" +
+		"  load-prompt:\n    path: " + promptsDir + "\n"
+	binPath := setupEnvWithConfig(t, bin, "FAL_KEY=test\n", cfg)
+
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPI(t, successHandler(t, imageServer, nil), nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	runBinary(t, binPath, []string{"gen", "--load-prompt", outFile}, "\n",
+		ttyEnv("FAL_BASE_URL="+server.URL, "PATH="+binDir+":/usr/bin:/bin"))
+
+	logged, err := os.ReadFile(argvLog)
+	if err != nil {
+		t.Fatalf("read argv log: %v", err)
+	}
+	if strings.Contains(string(logged), "--query=") {
+		t.Errorf("expected NO --query when filter empty, got: %q", string(logged))
+	}
+}
+
+// RT-12.9: model-picker.preselect matching a model puts it first in the candidate list.
+func TestInteractive_modelpicker_preselect_matches_RT12_9(t *testing.T) {
+	bin := buildBinary(t)
+	binDir, stdinLog := fzfStdinLoggerDir(t)
+
+	cfg := "model: fal-ai/grok-2-aurora\ninteractive:\n  picker: fzf\n" +
+		"  model-picker:\n    preselect: fal-ai/middle\n"
+	binPath := setupEnvWithConfig(t, bin, "FAL_KEY=test\n", cfg)
+
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPIWithModels(t,
+		successHandler(t, imageServer, nil), nil,
+		func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(fakeModelsResponse([]string{
+				"fal-ai/aaa", "fal-ai/middle", "fal-ai/zzz",
+			}, "text-to-image")))
+		})
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	runBinary(t, binPath, []string{"gen", "--pick-model", outFile}, "a prompt",
+		ttyEnv("FAL_BASE_URL="+server.URL, "PATH="+binDir+":/usr/bin:/bin"))
+
+	candidates, err := os.ReadFile(stdinLog)
+	if err != nil {
+		t.Fatalf("read stdin log: %v", err)
+	}
+	lines := strings.Split(strings.TrimRight(string(candidates), "\n"), "\n")
+	if len(lines) == 0 || lines[0] != "fal-ai/middle" {
+		t.Errorf("expected first candidate 'fal-ai/middle', got first line: %q (all: %v)", lines[0], lines)
+	}
+}
+
+// RT-12.10: preselect with no match leaves candidates in default order.
+func TestInteractive_modelpicker_preselect_no_match_RT12_10(t *testing.T) {
+	bin := buildBinary(t)
+	binDir, stdinLog := fzfStdinLoggerDir(t)
+
+	cfg := "model: fal-ai/grok-2-aurora\ninteractive:\n  picker: fzf\n" +
+		"  model-picker:\n    preselect: fal-ai/not-in-list\n"
+	binPath := setupEnvWithConfig(t, bin, "FAL_KEY=test\n", cfg)
+
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPIWithModels(t,
+		successHandler(t, imageServer, nil), nil,
+		func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(fakeModelsResponse([]string{
+				"fal-ai/aaa", "fal-ai/bbb", "fal-ai/ccc",
+			}, "text-to-image")))
+		})
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	runBinary(t, binPath, []string{"gen", "--pick-model", outFile}, "a prompt",
+		ttyEnv("FAL_BASE_URL="+server.URL, "PATH="+binDir+":/usr/bin:/bin"))
+
+	candidates, err := os.ReadFile(stdinLog)
+	if err != nil {
+		t.Fatalf("read stdin log: %v", err)
+	}
+	lines := strings.Split(strings.TrimRight(string(candidates), "\n"), "\n")
+	if len(lines) == 0 || lines[0] != "fal-ai/aaa" {
+		t.Errorf("expected default order first line 'fal-ai/aaa', got: %q (all: %v)", lines[0], lines)
+	}
+}
+
+// RT-12.11: preselect empty leaves candidates in default order.
+func TestInteractive_modelpicker_preselect_empty_RT12_11(t *testing.T) {
+	bin := buildBinary(t)
+	binDir, stdinLog := fzfStdinLoggerDir(t)
+
+	cfg := "model: fal-ai/grok-2-aurora\ninteractive:\n  picker: fzf\n  model-picker: {}\n"
+	binPath := setupEnvWithConfig(t, bin, "FAL_KEY=test\n", cfg)
+
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPIWithModels(t,
+		successHandler(t, imageServer, nil), nil,
+		func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(fakeModelsResponse([]string{
+				"fal-ai/aaa", "fal-ai/middle", "fal-ai/zzz",
+			}, "text-to-image")))
+		})
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	runBinary(t, binPath, []string{"gen", "--pick-model", outFile}, "a prompt",
+		ttyEnv("FAL_BASE_URL="+server.URL, "PATH="+binDir+":/usr/bin:/bin"))
+
+	candidates, err := os.ReadFile(stdinLog)
+	if err != nil {
+		t.Fatalf("read stdin log: %v", err)
+	}
+	lines := strings.Split(strings.TrimRight(string(candidates), "\n"), "\n")
+	if len(lines) == 0 || lines[0] != "fal-ai/aaa" {
+		t.Errorf("expected default order first line 'fal-ai/aaa', got: %q (all: %v)", lines[0], lines)
+	}
+}
+
+// RT-12.12: legacy interactive.load-prompt.always:true does NOT trigger the picker.
+func TestInteractive_legacy_loadprompt_always_ignored_RT12_12(t *testing.T) {
+	bin := buildBinary(t)
+	promptsDir := t.TempDir()
+	writePromptFile(t, promptsDir, "saved.md", "should-not-fire")
+
+	// Legacy key under load-prompt (not prompt-picker).
+	cfg := "model: fal-ai/grok-2-aurora\ninteractive:\n  picker: head -n 1\n" +
+		"  load-prompt:\n    always: true\n    path: " + promptsDir + "\n"
+	binPath := setupEnvWithConfig(t, bin, "FAL_KEY=test\n", cfg)
+
+	var capturedBody string
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPI(t, successHandler(t, imageServer, &capturedBody), nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	runBinary(t, binPath, []string{"gen", outFile}, "user prompt",
+		ttyEnv("FAL_BASE_URL="+server.URL))
+
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(capturedBody), &parsed); err != nil {
+		t.Fatalf("parse body: %v", err)
+	}
+	got, _ := parsed["prompt"].(string)
+	if got != "user prompt" {
+		t.Errorf("expected stdin to be used (legacy key ignored); got: %q", got)
+	}
+}
+
+// RT-12.13: legacy interactive.load-prompt.filter does NOT pass --query.
+func TestInteractive_legacy_loadprompt_filter_ignored_RT12_13(t *testing.T) {
+	bin := buildBinary(t)
+	binDir, argvLog := fzfArgvStubDir(t)
+
+	promptsDir := t.TempDir()
+	writePromptFile(t, promptsDir, "p1.md", "x")
+
+	// Legacy filter under load-prompt (not prompt-picker).
+	cfg := "model: fal-ai/grok-2-aurora\ninteractive:\n  picker: fzf\n" +
+		"  load-prompt:\n    filter: legacy-image\n    path: " + promptsDir + "\n"
+	binPath := setupEnvWithConfig(t, bin, "FAL_KEY=test\n", cfg)
+
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPI(t, successHandler(t, imageServer, nil), nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	runBinary(t, binPath, []string{"gen", "--load-prompt", outFile}, "\n",
+		ttyEnv("FAL_BASE_URL="+server.URL, "PATH="+binDir+":/usr/bin:/bin"))
+
+	logged, err := os.ReadFile(argvLog)
+	if err != nil {
+		t.Fatalf("read argv log: %v", err)
+	}
+	if strings.Contains(string(logged), "--query=") || strings.Contains(string(logged), "legacy-image") {
+		t.Errorf("expected legacy load-prompt.filter to be ignored; got argv: %q", string(logged))
+	}
 }

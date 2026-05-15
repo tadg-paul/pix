@@ -28,36 +28,56 @@ func run() int {
 		return 0
 	}
 
-	// Parse global flags up to the first non-flag (subcommand) or end of args.
+	// Single-pass classification. Recognised global flags (-q/--quiet, --version)
+	// are consumed regardless of position. -h/--help is top-level when it appears
+	// before any subcommand token, subcommand-level otherwise. Every other flag
+	// (and any non-flag token after the first) goes into subcommandArgs for the
+	// subcommand handler to interpret.
 	quiet := false
-	helpRequested := false
+	helpTopLevel := false
 	versionRequested := false
-	subcommandIdx := -1
+	subcommand := ""
+	var subcommandArgs []string
 
-	for i, arg := range args {
+	for _, arg := range args {
 		if !strings.HasPrefix(arg, "-") {
-			subcommandIdx = i
-			break
+			if subcommand == "" {
+				subcommand = arg
+			} else {
+				subcommandArgs = append(subcommandArgs, arg)
+			}
+			continue
 		}
 		switch arg {
-		case "-h", "--help":
-			helpRequested = true
-		case "--version":
-			versionRequested = true
 		case "-q", "--quiet":
 			quiet = true
+		case "--version":
+			versionRequested = true
+		case "-h", "--help":
+			if subcommand == "" {
+				helpTopLevel = true
+			} else {
+				subcommandArgs = append(subcommandArgs, arg)
+			}
 		default:
-			// Non-global flag in the global position.
-			fmt.Fprintf(os.Stderr, "Error: %s is not a global flag (must be placed after the subcommand)\n", arg)
-			printUsage()
-			return 2
+			subcommandArgs = append(subcommandArgs, arg)
 		}
 	}
 
-	// --help is mutually exclusive with all other flags and arguments.
-	if helpRequested {
-		hasOther := versionRequested || quiet || subcommandIdx >= 0
-		if hasOther {
+	// Determine subcommand-level --help and split subcommandArgs accordingly.
+	helpSubcommand := false
+	var nonHelpSubArgs []string
+	for _, a := range subcommandArgs {
+		if a == "-h" || a == "--help" {
+			helpSubcommand = true
+			continue
+		}
+		nonHelpSubArgs = append(nonHelpSubArgs, a)
+	}
+
+	// Top-level --help: mutually exclusive with every other flag/arg.
+	if helpTopLevel {
+		if versionRequested || quiet || subcommand != "" || len(subcommandArgs) > 0 {
 			fmt.Fprintln(os.Stderr, "Error: --help cannot be combined with other flags or arguments")
 			printUsage()
 			return 2
@@ -66,9 +86,38 @@ func run() int {
 		return 0
 	}
 
-	// --version takes precedence over subcommand dispatch (but not over --help).
+	// Subcommand-level --help: mutually exclusive with every other flag/arg.
+	if helpSubcommand {
+		if versionRequested || quiet || len(nonHelpSubArgs) > 0 {
+			fmt.Fprintln(os.Stderr, "Error: --help cannot be combined with other flags or arguments")
+			// Print the subcommand's helptext on error (rather than top-level)
+			// since the user clearly intended a subcommand invocation.
+			switch subcommand {
+			case "generate", "gen":
+				printHelptext("generate")
+			case "cost":
+				printHelptext("cost")
+			default:
+				printUsage()
+			}
+			return 2
+		}
+		switch subcommand {
+		case "generate", "gen":
+			printHelptext("generate")
+		case "cost":
+			printHelptext("cost")
+		default:
+			fmt.Fprintf(os.Stderr, "Unknown subcommand: %s\n", subcommand)
+			printUsage()
+			return 2
+		}
+		return 0
+	}
+
+	// --version: mutually exclusive with every other flag/arg.
 	if versionRequested {
-		if quiet || subcommandIdx >= 0 {
+		if quiet || subcommand != "" || len(subcommandArgs) > 0 {
 			fmt.Fprintln(os.Stderr, "Error: --version cannot be combined with other flags or arguments")
 			printUsage()
 			return 2
@@ -77,14 +126,16 @@ func run() int {
 		return 0
 	}
 
-	// No subcommand provided after global flags.
-	if subcommandIdx < 0 {
+	// No subcommand. If we still have flags pending, they're unknown at the top level.
+	if subcommand == "" {
+		if len(subcommandArgs) > 0 {
+			fmt.Fprintf(os.Stderr, "Unknown flag: %s\n", subcommandArgs[0])
+			printUsage()
+			return 2
+		}
 		printUsage()
 		return 2
 	}
-
-	subcommand := args[subcommandIdx]
-	subcommandArgs := args[subcommandIdx+1:]
 
 	switch subcommand {
 	case "generate", "gen":

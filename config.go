@@ -19,20 +19,29 @@ type apiKeyConfig struct {
 }
 
 type loadPromptConfig struct {
-	Path   string `yaml:"path"`
+	// Path is the directory where saved prompt files live. Data source only;
+	// picker behaviour (always, filter) lives under prompt-picker.
+	Path string `yaml:"path"`
+}
+
+type promptPickerConfig struct {
 	Always bool   `yaml:"always"`
+	Filter string `yaml:"filter"` // pre-fill the picker's search box (fzf --query)
 }
 
 type modelPickerConfig struct {
-	Always bool `yaml:"always"`
+	Always    bool   `yaml:"always"`
+	Filter    string `yaml:"filter"`    // pre-fill the picker's search box (fzf --query)
+	Preselect string `yaml:"preselect"` // endpoint_id to surface as the first candidate
 }
 
 // interactiveConfig holds settings that only apply when stdin is a TTY.
 // Piped or redirected invocations silently bypass every option in this block.
 type interactiveConfig struct {
-	Picker      string            `yaml:"picker"`
-	LoadPrompt  loadPromptConfig  `yaml:"load-prompt"`
-	ModelPicker modelPickerConfig `yaml:"model-picker"`
+	Picker       string             `yaml:"picker"`
+	PromptPicker promptPickerConfig `yaml:"prompt-picker"`
+	LoadPrompt   loadPromptConfig   `yaml:"load-prompt"`
+	ModelPicker  modelPickerConfig  `yaml:"model-picker"`
 }
 
 type config struct {

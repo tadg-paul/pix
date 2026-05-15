@@ -31,17 +31,16 @@ func printGenImgUsage(subcommandName string) {
 func runGenImg(args []string, globalQuiet bool, subcommandName string) int {
 	dryRun := false
 	preview := false
-	helpRequested := false
 	loadPromptFlag := false
 	noLoadPromptFlag := false
 	pickModelFlag := false
 	noPickModelFlag := false
 	var positionals []string
 
+	// Note: -q/--quiet and -h/--help are consumed by main.go's top-level parser
+	// before this handler is called; they should never reach this loop.
 	for _, arg := range args {
 		switch arg {
-		case "-h", "--help":
-			helpRequested = true
 		case "--dry-run":
 			dryRun = true
 		case "-p", "--preview":
@@ -54,10 +53,6 @@ func runGenImg(args []string, globalQuiet bool, subcommandName string) int {
 			pickModelFlag = true
 		case "--no-pick-model":
 			noPickModelFlag = true
-		case "-q", "--quiet":
-			fmt.Fprintln(os.Stderr, "Error: --quiet is a global flag and must be placed before the subcommand")
-			fmt.Fprintf(os.Stderr, "       (try: pix --quiet %s ...)\n", subcommandName)
-			return 2
 		default:
 			if strings.HasPrefix(arg, "-") {
 				fmt.Fprintf(os.Stderr, "Unknown flag: %s\n", arg)
@@ -66,18 +61,6 @@ func runGenImg(args []string, globalQuiet bool, subcommandName string) int {
 			}
 			positionals = append(positionals, arg)
 		}
-	}
-
-	// --help is mutually exclusive with all other args/flags.
-	if helpRequested {
-		hasOther := dryRun || preview || loadPromptFlag || noLoadPromptFlag || pickModelFlag || noPickModelFlag || len(positionals) > 0
-		if hasOther {
-			fmt.Fprintln(os.Stderr, "Error: --help cannot be combined with other flags or arguments")
-			printGenImgUsage(subcommandName)
-			return 2
-		}
-		printGenImgUsage(subcommandName)
-		return 0
 	}
 
 	if len(positionals) == 0 {
@@ -143,7 +126,7 @@ func runGenImg(args []string, globalQuiet bool, subcommandName string) int {
 		pickedEndpoint = ep
 	}
 
-	useLoadPrompt := !noLoadPromptFlag && (loadPromptFlag || cfg.Interactive.LoadPrompt.Always)
+	useLoadPrompt := !noLoadPromptFlag && (loadPromptFlag || cfg.Interactive.PromptPicker.Always)
 
 	var prompt string
 	if useLoadPrompt && isStdinTTY() {

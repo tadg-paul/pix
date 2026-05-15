@@ -60,13 +60,17 @@ func runLoadPromptFlow(cfg *config, globalQuiet bool) (*loadPromptResult, error)
 	// (--with-nth=-1). fzf's {} placeholder in --preview still resolves to the
 	// whole line (the full path), so `cat {}` previews the file correctly.
 	// --preview-window=wrap so long prompts don't get truncated on the right edge.
-	selected, cancelled, err := invokePicker(picker, files,
+	fzfArgs := []string{
 		`--header='Select a saved prompt'`,
 		`--delimiter=/`,
 		`--with-nth=-1`,
 		`--preview='cat {}'`,
 		`--preview-window=right:60%:wrap`,
-	)
+	}
+	if cfg.Interactive.PromptPicker.Filter != "" {
+		fzfArgs = append(fzfArgs, "--query="+shellQuote(cfg.Interactive.PromptPicker.Filter))
+	}
+	selected, cancelled, err := invokePicker(picker, files, fzfArgs...)
 	if err != nil {
 		return nil, err
 	}
@@ -81,9 +85,11 @@ func runLoadPromptFlow(cfg *config, globalQuiet bool) (*loadPromptResult, error)
 	base := strings.TrimRight(string(baseBytes), " \t\r\n")
 
 	if !globalQuiet {
-		fmt.Fprintln(os.Stderr, "Selected prompt:")
+		fmt.Fprintln(os.Stderr, "PROMPT: (type to add, Enter to send, Ctrl-C to cancel)")
+		fmt.Fprintln(os.Stderr, "")
 		fmt.Fprintln(os.Stderr, base)
-		fmt.Fprint(os.Stderr, "Add to prompt (Enter to send as-is): ")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprint(os.Stderr, "⭐ ")
 	}
 
 	reader := bufio.NewReader(os.Stdin)
@@ -147,6 +153,13 @@ func listPromptFiles(dir string) ([]string, error) {
 // options are appended to the picker command line. Each opt must be a single
 // shell token (callers single-quote any value containing whitespace -- sh -c
 // parses the full command, then fzf sees properly tokenised args).
+// shellQuote returns its argument wrapped in single quotes, escaping any
+// embedded single quotes per POSIX. Safe for substitution into sh -c command
+// strings.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
 func invokePicker(pickerCmd string, candidates []string, extraFzfOpts ...string) (string, bool, error) {
 	finalCmd := pickerCmd
 	if len(extraFzfOpts) > 0 && pickerFirstToken(pickerCmd) == "fzf" {

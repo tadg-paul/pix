@@ -17,10 +17,15 @@ Flags:
   --pick-model        Pick a FAL model from the catalogue via the picker
   --no-pick-model     Disable model-picker mode for this invocation
 
-Global flags (place before subcommand):
+Global flags:
   -q, --quiet         Suppress non-error output
 
+Recognized flags may appear in any position (before, after, or interleaved
+with positional arguments).
+
 Interactive features (--load-prompt and --pick-model, plus their config
-defaults under interactive: in config.yaml) only fire when stdin is a
-TTY. Piped or redirected invocations silently bypass them so scripts
-stay scripts.
+defaults under interactive.prompt-picker.always / interactive.model-picker.always
+in config.yaml) only fire when stdin is a TTY. Piped or redirected invocations
+silently bypass them so scripts stay scripts.
+
+Run 'pix --help' for the top-level usage and the full subcommand list.

@@ -127,14 +127,20 @@ api-keys:
 # in this block -- pix stays scriptable.
 # interactive:
 #   picker: fzf                          # shared by --load-prompt and --pick-model (default: fzf)
-#   load-prompt:
-#     path: ~/.config/pix/prompts        # directory of saved prompt files
+#   prompt-picker:
 #     always: false                      # if true, --load-prompt is implicit on every gen
+#     filter: ""                         # if set, fzf opens with this query pre-filled
+#   load-prompt:
+#     path: ~/.config/pix/prompts        # directory of saved prompt files (data source)
 #   model-picker:
 #     always: false                      # if true, --pick-model is implicit on every gen
+#     filter: ""                         # if set, fzf opens with this query pre-filled
+#     preselect: ""                      # if set, this endpoint_id is the first candidate
 ```
 
 > **Config migration (2026-05-13):** the previous flat layout (`picker:`, `load-prompt:`, `model-picker:` at top level) is gone. Move those keys under a single `interactive:` parent block as shown above. The reorganization makes the TTY-only nature of these settings clear at-a-glance.
+>
+> **Config refactor (2026-05-13):** picker behaviour for saved prompts moves out of `load-prompt:` and into a parallel `prompt-picker:` block. The `load-prompt:` block now holds only the data source (`path:`). Move `load-prompt.always` to `prompt-picker.always`; move `load-prompt.filter` to `prompt-picker.filter`. Legacy keys under `load-prompt:` are silently ignored (no error, no warning -- the picker simply will not fire unless migrated). The `model-picker:` block gains a new `preselect:` field that names an `endpoint_id` to surface as the first candidate.
 
 ### Saved prompts
 

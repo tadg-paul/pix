@@ -76,6 +76,12 @@ func runModelPickerFlow(cfg *config, falKey string, hasRefs bool) (string, bool,
 	}
 	defer os.RemoveAll(tempDir)
 
+	// Reorder so the preselected endpoint_id (if present) is the first
+	// candidate. fzf highlights the first line by default, giving the user a
+	// one-keystroke confirm. If preselect is empty or doesn't match any model,
+	// the candidate order is the default (API order).
+	models = reorderPreselect(models, cfg.Interactive.ModelPicker.Preselect)
+
 	candidates := make([]string, 0, len(models))
 	for _, m := range models {
 		candidates = append(candidates, m.EndpointID)
@@ -86,11 +92,15 @@ func runModelPickerFlow(cfg *config, falKey string, hasRefs bool) (string, bool,
 
 	headerArg := "--header='Select a FAL model (" + category + ")'"
 	previewArg := "--preview='cat " + tempDir + "/{}.md'"
-	selected, cancelled, err := invokePicker(picker, candidates,
+	fzfArgs := []string{
 		headerArg,
 		previewArg,
 		"--preview-window=right:60%:wrap",
-	)
+	}
+	if cfg.Interactive.ModelPicker.Filter != "" {
+		fzfArgs = append(fzfArgs, "--query="+shellQuote(cfg.Interactive.ModelPicker.Filter))
+	}
+	selected, cancelled, err := invokePicker(picker, candidates, fzfArgs...)
 	if err != nil {
 		return "", false, err
 	}
@@ -143,6 +153,28 @@ func writeModelDetails(tempDir string, m modelEntry) error {
 	}
 
 	return os.WriteFile(path, []byte(sb.String()), 0644)
+}
+
+// reorderPreselect moves the entry whose EndpointID matches preselect to the
+// front of the slice. If preselect is empty or no entry matches, returns the
+// slice unchanged. Stable for the remaining entries.
+func reorderPreselect(models []modelEntry, preselect string) []modelEntry {
+	if preselect == "" {
+		return models
+	}
+	for i, m := range models {
+		if m.EndpointID == preselect {
+			if i == 0 {
+				return models
+			}
+			out := make([]modelEntry, 0, len(models))
+			out = append(out, m)
+			out = append(out, models[:i]...)
+			out = append(out, models[i+1:]...)
+			return out
+		}
+	}
+	return models
 }
 
 // fetchModels queries FAL's /v1/models endpoint for active models in the given category.

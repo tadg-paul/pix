@@ -20,18 +20,13 @@ func printCostUsage() {
 // --quiet flag parsed before the subcommand.
 func runCost(args []string, globalQuiet bool) int {
 	dryRun := false
-	helpRequested := false
 
+	// Note: -q/--quiet and -h/--help are consumed by main.go's top-level parser
+	// before this handler is called; they should never reach this loop.
 	for _, arg := range args {
 		switch arg {
-		case "-h", "--help":
-			helpRequested = true
 		case "--dry-run":
 			dryRun = true
-		case "-q", "--quiet":
-			fmt.Fprintln(os.Stderr, "Error: --quiet is a global flag and must be placed before the subcommand")
-			fmt.Fprintln(os.Stderr, "       (try: pix --quiet cost ...)")
-			return 2
 		default:
 			if strings.HasPrefix(arg, "-") {
 				fmt.Fprintf(os.Stderr, "Unknown flag: %s\n", arg)
@@ -42,17 +37,6 @@ func runCost(args []string, globalQuiet bool) int {
 			printCostUsage()
 			return 2
 		}
-	}
-
-	// --help is mutually exclusive with all other flags.
-	if helpRequested {
-		if dryRun {
-			fmt.Fprintln(os.Stderr, "Error: --help cannot be combined with other flags")
-			printCostUsage()
-			return 2
-		}
-		printCostUsage()
-		return 0
 	}
 
 	if globalQuiet {
