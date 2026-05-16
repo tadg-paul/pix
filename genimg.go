@@ -120,27 +120,33 @@ func runGenImg(args []string, globalQuiet bool, subcommandName string) int {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			return 1
 		}
-		if cancelled {
-			return 0
+		// On cancellation, leave pickedEndpoint empty so the existing
+		// cfg.Model default path applies. See issue #15.
+		if !cancelled {
+			pickedEndpoint = ep
 		}
-		pickedEndpoint = ep
 	}
 
 	useLoadPrompt := !noLoadPromptFlag && (loadPromptFlag || cfg.Interactive.PromptPicker.Always)
 
 	var prompt string
+	pickerProducedPrompt := false
 	if useLoadPrompt && isStdinTTY() {
 		result, err := runLoadPromptFlow(cfg, globalQuiet)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			return 1
 		}
-		if result.Cancelled {
-			return 0
+		// On cancellation (Esc / picker non-zero exit), fall through to
+		// readPrompt() rather than exiting -- the user can still type a prompt.
+		// Only Ctrl-C terminates pix (via SIGINT). See issue #15.
+		if !result.Cancelled {
+			prompt = result.Prompt
+			pickerProducedPrompt = true
 		}
-		prompt = result.Prompt
-	} else {
-		// Either load-prompt is inactive, or it is active but stdin is piped.
+	}
+	if !pickerProducedPrompt {
+		// Either load-prompt is inactive, or it cancelled, or stdin is piped.
 		// Piped stdin with content overrides the load-prompt flow.
 		prompt, err = readPrompt()
 		if err != nil {

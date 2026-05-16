@@ -2071,34 +2071,12 @@ func TestLoadPrompt_selected_becomes_prompt_RT8_6(t *testing.T) {
 	}
 }
 
-// RT-8.7: Picker non-zero exit (user cancellation) triggers pix exit 0 with no API call.
+// RT-8.7: 🚫 REMOVED -- superseded by issue #15 / RT-15.1.
+// Original behaviour: prompt picker cancel -> pix exits 0, no API call.
+// New behaviour: prompt picker cancel falls through to readPrompt(); API IS called
+// with whatever stdin produces. Only Ctrl-C terminates pix.
 func TestLoadPrompt_picker_cancel_exits_zero_RT8_7(t *testing.T) {
-	bin := buildBinary(t)
-	promptsDir := t.TempDir()
-	writePromptFile(t, promptsDir, "p1.md", "anything")
-
-	binPath := setupEnvWithConfig(t, bin, "FAL_KEY=test\n",
-		loadPromptConfigYAML("fal-ai/grok-2-aurora", promptsDir, pickCancel, false))
-
-	apiCalled := false
-	server := startFakeAPI(t, func(w http.ResponseWriter, r *http.Request) {
-		apiCalled = true
-		http.Error(w, "should not be called", 500)
-	}, nil)
-
-	outFile := filepath.Join(t.TempDir(), "out.png")
-	_, _, exitCode := runBinary(t, binPath, []string{"generate", "--load-prompt", outFile}, "\n",
-		ttyEnv("FAL_BASE_URL="+server.URL))
-
-	if exitCode != 0 {
-		t.Errorf("Expected exit 0 on cancellation, got %d", exitCode)
-	}
-	if apiCalled {
-		t.Errorf("Expected no API call on cancellation")
-	}
-	if _, err := os.Stat(outFile); err == nil {
-		t.Errorf("Expected no output file on cancellation")
-	}
+	t.Skip("Superseded by issue #15 -- prompt-picker cancel now falls through to stdin (RT-15.1)")
 }
 
 // RT-8.8: 🚫 REMOVED (superseded by RT-8.32 / AC8.17).
@@ -3132,30 +3110,12 @@ func TestModelPicker_does_not_mutate_config_RT10_6(t *testing.T) {
 	}
 }
 
-// RT-10.7: picker non-zero exit (cancellation) -> pix exit 0 with no generation request.
+// RT-10.7: 🚫 REMOVED -- superseded by issue #15 / RT-15.2.
+// Original behaviour: model-picker cancel -> pix exit 0, no generation request.
+// New behaviour: model-picker cancel falls through to cfg.Model; generation IS called
+// against the default endpoint. Only Ctrl-C terminates pix.
 func TestModelPicker_cancel_no_generation_RT10_7(t *testing.T) {
-	bin := buildBinary(t)
-	binPath := setupEnvWithConfig(t, bin, "FAL_KEY=test\n",
-		modelPickerConfigYAML("fal-ai/grok-2-aurora", pickCancel, false))
-
-	generateCalled := false
-	server := startFakeAPIWithModels(t,
-		func(w http.ResponseWriter, r *http.Request) { generateCalled = true }, nil,
-		func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(fakeModelsResponse([]string{"fal-ai/flux/dev"}, "text-to-image")))
-		})
-
-	outFile := filepath.Join(t.TempDir(), "out.png")
-	_, _, exitCode := runBinary(t, binPath, []string{"gen", "--pick-model", outFile}, "a prompt",
-		ttyEnv("FAL_BASE_URL="+server.URL))
-
-	if exitCode != 0 {
-		t.Errorf("Expected exit 0 on picker cancel, got %d", exitCode)
-	}
-	if generateCalled {
-		t.Errorf("Expected no generation call when picker cancelled")
-	}
+	t.Skip("Superseded by issue #15 -- model-picker cancel now falls through to cfg.Model (RT-15.2)")
 }
 
 // RT-10.8: model-picker.always:true triggers picker without --pick-model flag.
@@ -4319,5 +4279,130 @@ func TestInteractive_preselect_regex_invalid_RT14_3(t *testing.T) {
 	// Warning was emitted.
 	if !strings.Contains(strings.ToLower(stderr), "not a valid regex") {
 		t.Errorf("expected stderr warning about invalid regex, got: %q", stderr)
+	}
+}
+
+// --- fzf Esc fall-back (issue #15) ---
+
+// RT-15.1: prompt-picker cancellation falls through to stdin (not exit 0).
+// Picker stub exits non-zero (simulating Esc); pix reads piped stdin and uses it as the prompt.
+func TestPickers_prompt_cancel_falls_through_stdin_RT15_1(t *testing.T) {
+	bin := buildBinary(t)
+	promptsDir := t.TempDir()
+	writePromptFile(t, promptsDir, "p1.md", "should-not-be-used")
+
+	binPath := setupEnvWithConfig(t, bin, "FAL_KEY=test\n",
+		loadPromptConfigYAML("fal-ai/grok-2-aurora", promptsDir, pickCancel, false))
+
+	var capturedBody string
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPI(t, successHandler(t, imageServer, &capturedBody), nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	_, stderr, exitCode := runBinary(t, binPath, []string{"generate", "--load-prompt", outFile},
+		"typed after cancelling picker",
+		ttyEnv("FAL_BASE_URL="+server.URL))
+
+	if exitCode != 0 {
+		t.Fatalf("expected exit 0 (fall-through to stdin), got %d; stderr: %s", exitCode, stderr)
+	}
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(capturedBody), &parsed); err != nil {
+		t.Fatalf("parse body: %v", err)
+	}
+	got, _ := parsed["prompt"].(string)
+	if got != "typed after cancelling picker" {
+		t.Errorf("expected stdin prompt after picker cancellation, got: %q", got)
+	}
+}
+
+// RT-15.2: model-picker cancellation falls through to cfg.Model (not exit 0).
+func TestPickers_model_cancel_falls_through_to_cfgModel_RT15_2(t *testing.T) {
+	bin := buildBinary(t)
+	binPath := setupEnvWithConfig(t, bin, "FAL_KEY=test\n",
+		modelPickerConfigYAML("fal-ai/grok-2-aurora", pickCancel, false))
+
+	var generatePath string
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPIWithModels(t,
+		func(w http.ResponseWriter, r *http.Request) {
+			generatePath = r.URL.Path
+			resp := map[string]interface{}{
+				"images": []map[string]interface{}{{"url": imageServer.URL + "/img.png"}},
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(resp)
+		}, nil,
+		func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(fakeModelsResponse([]string{"fal-ai/should-not-be-picked"}, "text-to-image")))
+		})
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	_, stderr, exitCode := runBinary(t, binPath, []string{"gen", "--pick-model", outFile}, "a prompt",
+		ttyEnv("FAL_BASE_URL="+server.URL))
+
+	if exitCode != 0 {
+		t.Fatalf("expected exit 0 on model-picker cancel (fall-through to cfg.Model), got %d; stderr: %s", exitCode, stderr)
+	}
+	if !strings.Contains(generatePath, "grok-2-aurora") {
+		t.Errorf("expected cfg.Model used after picker cancel; generation path: %q", generatePath)
+	}
+	if strings.Contains(generatePath, "should-not-be-picked") {
+		t.Errorf("did not expect picker candidate after cancellation; generation path: %q", generatePath)
+	}
+}
+
+// RT-15.3: both pickers active, both cancelled -> stdin prompt + cfg.Model used; image written.
+func TestPickers_both_cancel_fall_through_RT15_3(t *testing.T) {
+	bin := buildBinary(t)
+	promptsDir := t.TempDir()
+	writePromptFile(t, promptsDir, "p1.md", "ignored-prompt")
+
+	cfg := "model: fal-ai/grok-2-aurora\ninteractive:\n  picker: false\n" +
+		"  prompt-picker:\n    always: true\n" +
+		"  load-prompt:\n    path: " + promptsDir + "\n" +
+		"  model-picker:\n    always: true\n"
+	binPath := setupEnvWithConfig(t, bin, "FAL_KEY=test\n", cfg)
+
+	var capturedBody string
+	var generatePath string
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPIWithModels(t,
+		func(w http.ResponseWriter, r *http.Request) {
+			generatePath = r.URL.Path
+			body, _ := io.ReadAll(r.Body)
+			capturedBody = string(body)
+			resp := map[string]interface{}{
+				"images": []map[string]interface{}{{"url": imageServer.URL + "/img.png"}},
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(resp)
+		}, nil,
+		func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(fakeModelsResponse([]string{"fal-ai/should-not-be-picked"}, "text-to-image")))
+		})
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	_, stderr, exitCode := runBinary(t, binPath, []string{"gen", outFile}, "typed end-to-end",
+		ttyEnv("FAL_BASE_URL="+server.URL))
+
+	if exitCode != 0 {
+		t.Fatalf("expected exit 0 with both pickers cancelled, got %d; stderr: %s", exitCode, stderr)
+	}
+	if !strings.Contains(generatePath, "grok-2-aurora") {
+		t.Errorf("expected cfg.Model after model-picker cancel; got: %q", generatePath)
+	}
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(capturedBody), &parsed); err != nil {
+		t.Fatalf("parse body: %v", err)
+	}
+	got, _ := parsed["prompt"].(string)
+	if got != "typed end-to-end" {
+		t.Errorf("expected stdin prompt after prompt-picker cancel; got: %q", got)
+	}
+	if _, err := os.Stat(outFile); err != nil {
+		t.Errorf("expected output file written: %v", err)
 	}
 }
