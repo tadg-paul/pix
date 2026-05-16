@@ -160,6 +160,19 @@ func runGenImg(args []string, globalQuiet bool, subcommandName string) int {
 	}
 
 	// Build endpoint and payload depending on whether refs are present.
+	//
+	// Endpoint resolution:
+	//   - --pick-model set & not cancelled: use the picked endpoint as-is.
+	//     The user explicitly chose it; pix does not append suffixes.
+	//   - Otherwise + refs present: editEndpointFor() routes via the
+	//     model_registry (explicit pairs for kontext/glm/seedream/emu,
+	//     suffix heuristic for everything else).
+	//   - Otherwise: cfg.Model unchanged.
+	//
+	// Payload ref-field naming:
+	//   - handlerFor() resolves the per-family quirk (image_url vs image_urls).
+	//   - Kontext-family models send the first ref as singular image_url;
+	//     most other families send the array as image_urls.
 	endpoint := cfg.Model
 	if pickedEndpoint != "" {
 		endpoint = pickedEndpoint
@@ -167,8 +180,7 @@ func runGenImg(args []string, globalQuiet bool, subcommandName string) int {
 	payload := map[string]interface{}{"prompt": prompt}
 	if len(refs) > 0 {
 		if pickedEndpoint == "" {
-			// Default behaviour for cfg.Model: append /edit suffix when refs present.
-			endpoint = cfg.Model + "/edit"
+			endpoint = editEndpointFor(cfg.Model)
 		}
 		uris := make([]string, 0, len(refs))
 		for _, ref := range refs {
@@ -179,20 +191,26 @@ func runGenImg(args []string, globalQuiet bool, subcommandName string) int {
 			}
 			uris = append(uris, uri)
 		}
-		payload["image_urls"] = uris
+		handler := handlerFor(endpoint)
+		field, value := handler.refPayload(uris, globalQuiet)
+		payload[field] = value
 	}
 
 	if dryRun {
 		url := fmt.Sprintf("%s/%s", baseURL, endpoint)
 
 		// For dry-run output, replace base64 data with filename references for readability.
+		// Mirrors the live payload's ref-field naming so the preview reflects what
+		// would actually be sent.
 		displayPayload := map[string]interface{}{"prompt": prompt}
 		if len(refs) > 0 {
 			displayURLs := make([]string, 0, len(refs))
 			for _, ref := range refs {
 				displayURLs = append(displayURLs, fmt.Sprintf("<base64 of %s>", ref))
 			}
-			displayPayload["image_urls"] = displayURLs
+			handler := handlerFor(endpoint)
+			field, value := handler.refPayload(displayURLs, true /*quiet warn on dry-run*/)
+			displayPayload[field] = value
 		}
 		pretty, err := json.MarshalIndent(displayPayload, "", "  ")
 		if err != nil {

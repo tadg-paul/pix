@@ -4788,3 +4788,191 @@ func TestFAL_error_empty_body_RT18_5(t *testing.T) {
 		t.Errorf("expected empty-body indicator in stderr, got: %q", stderr)
 	}
 }
+
+// --- Per-model payload routing (discovery #18) ---
+
+// RT-18.6: kontext model + ref uses image_url (singular) at the base endpoint
+// (NOT /edit suffix). This is the user-reported bug shape from 2026-05-16.
+func TestModelRouter_kontext_uses_image_url_singular_RT18_6(t *testing.T) {
+	bin := buildBinary(t)
+	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/flux-pro/kontext\n")
+
+	refDir := t.TempDir()
+	refPath := writeRefImage(t, refDir, "ref.png", fakeImagePNG)
+
+	var capturedBody string
+	var capturedPath string
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPI(t, func(w http.ResponseWriter, r *http.Request) {
+		capturedPath = r.URL.Path
+		body, _ := io.ReadAll(r.Body)
+		capturedBody = string(body)
+		resp := map[string]interface{}{
+			"images": []map[string]interface{}{{"url": imageServer.URL + "/i.png"}},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}, nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	_, stderr, exitCode := runBinary(t, binPath, []string{"gen", refPath, outFile}, "edit",
+		[]string{"FAL_BASE_URL=" + server.URL})
+
+	if exitCode != 0 {
+		t.Fatalf("expected exit 0, got %d; stderr: %s", exitCode, stderr)
+	}
+	if strings.HasSuffix(capturedPath, "/edit") {
+		t.Errorf("expected NO /edit suffix on kontext path, got: %q", capturedPath)
+	}
+	if !strings.Contains(capturedPath, "kontext") {
+		t.Errorf("expected base kontext endpoint, got path: %q", capturedPath)
+	}
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(capturedBody), &parsed); err != nil {
+		t.Fatalf("parse body: %v", err)
+	}
+	if _, ok := parsed["image_urls"]; ok {
+		t.Errorf("kontext payload must NOT contain image_urls; payload: %v", parsed)
+	}
+	urlVal, ok := parsed["image_url"].(string)
+	if !ok || !strings.HasPrefix(urlVal, "data:image/png;base64,") {
+		t.Errorf("expected image_url string (data URI); payload: %v", parsed)
+	}
+}
+
+// RT-18.7: kontext + multiple refs uses the first, warns on stderr.
+func TestModelRouter_kontext_first_ref_only_with_warning_RT18_7(t *testing.T) {
+	bin := buildBinary(t)
+	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/flux-pro/kontext\n")
+
+	refDir := t.TempDir()
+	r1 := writeRefImage(t, refDir, "a.png", fakeImagePNG)
+	r2 := writeRefImage(t, refDir, "b.png", fakeImagePNG)
+	r3 := writeRefImage(t, refDir, "c.png", fakeImagePNG)
+
+	var capturedBody string
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPI(t, successHandler(t, imageServer, &capturedBody), nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	_, stderr, _ := runBinary(t, binPath, []string{"gen", r1, r2, r3, outFile}, "edit",
+		[]string{"FAL_BASE_URL=" + server.URL})
+
+	if !strings.Contains(strings.ToLower(stderr), "single reference image") {
+		t.Errorf("expected warning about single-ref limit, got: %q", stderr)
+	}
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(capturedBody), &parsed); err != nil {
+		t.Fatalf("parse body: %v", err)
+	}
+	if _, ok := parsed["image_url"].(string); !ok {
+		t.Errorf("expected single image_url string in payload, got: %v", parsed)
+	}
+}
+
+// RT-18.8: default-model (no kontext, no special edit-pair) still uses
+// image_urls and /edit suffix -- regression for existing behaviour.
+func TestModelRouter_default_unchanged_RT18_8(t *testing.T) {
+	bin := buildBinary(t)
+	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
+
+	refDir := t.TempDir()
+	refPath := writeRefImage(t, refDir, "ref.png", fakeImagePNG)
+
+	var capturedPath string
+	var capturedBody string
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPI(t, func(w http.ResponseWriter, r *http.Request) {
+		capturedPath = r.URL.Path
+		body, _ := io.ReadAll(r.Body)
+		capturedBody = string(body)
+		resp := map[string]interface{}{
+			"images": []map[string]interface{}{{"url": imageServer.URL + "/i.png"}},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}, nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	runBinary(t, binPath, []string{"gen", refPath, outFile}, "edit",
+		[]string{"FAL_BASE_URL=" + server.URL})
+
+	if !strings.HasSuffix(capturedPath, "/edit") {
+		t.Errorf("expected /edit suffix for default model, got: %q", capturedPath)
+	}
+	var parsed map[string]interface{}
+	json.Unmarshal([]byte(capturedBody), &parsed)
+	if _, ok := parsed["image_urls"]; !ok {
+		t.Errorf("expected image_urls (plural) for default model, got: %v", parsed)
+	}
+}
+
+// RT-18.9: explicit editSiblings entry overrides the suffix heuristic.
+// glm-image's edit endpoint is image-to-image, not /edit.
+func TestModelRouter_edit_siblings_lookup_RT18_9(t *testing.T) {
+	bin := buildBinary(t)
+	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/glm-image\n")
+
+	refDir := t.TempDir()
+	refPath := writeRefImage(t, refDir, "ref.png", fakeImagePNG)
+
+	var capturedPath string
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPI(t, func(w http.ResponseWriter, r *http.Request) {
+		capturedPath = r.URL.Path
+		resp := map[string]interface{}{
+			"images": []map[string]interface{}{{"url": imageServer.URL + "/i.png"}},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}, nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	runBinary(t, binPath, []string{"gen", refPath, outFile}, "edit",
+		[]string{"FAL_BASE_URL=" + server.URL})
+
+	if !strings.Contains(capturedPath, "image-to-image") {
+		t.Errorf("expected glm-image to route to image-to-image, got: %q", capturedPath)
+	}
+	if strings.HasSuffix(capturedPath, "/edit") {
+		t.Errorf("expected NOT to use /edit suffix for glm-image, got: %q", capturedPath)
+	}
+}
+
+// RT-18.10: --pick-model selection bypasses the editEndpointFor router.
+// The user explicitly chose an endpoint; pix sends to it verbatim.
+func TestModelRouter_pick_model_bypasses_router_RT18_10(t *testing.T) {
+	bin := buildBinary(t)
+	binPath := setupEnvWithConfig(t, bin, "FAL_KEY=test\n",
+		modelPickerConfigYAML("fal-ai/grok-2-aurora", "grep -m1 chosen", false))
+
+	refDir := t.TempDir()
+	refPath := writeRefImage(t, refDir, "ref.png", fakeImagePNG)
+
+	var capturedPath string
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPIWithModels(t,
+		func(w http.ResponseWriter, r *http.Request) {
+			capturedPath = r.URL.Path
+			resp := map[string]interface{}{
+				"images": []map[string]interface{}{{"url": imageServer.URL + "/i.png"}},
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(resp)
+		}, nil,
+		func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(fakeModelsResponse([]string{"fal-ai/other", "chosen-explicit-model"}, "image-to-image")))
+		})
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	runBinary(t, binPath, []string{"gen", "--pick-model", refPath, outFile}, "edit",
+		ttyEnv("FAL_BASE_URL="+server.URL))
+
+	if !strings.Contains(capturedPath, "chosen-explicit-model") {
+		t.Errorf("expected picker-chosen model used verbatim, got: %q", capturedPath)
+	}
+	if strings.HasSuffix(capturedPath, "/edit") {
+		t.Errorf("--pick-model selection must not be /edit-suffixed; got: %q", capturedPath)
+	}
+}
