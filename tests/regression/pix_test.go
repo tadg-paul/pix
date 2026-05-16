@@ -3697,86 +3697,20 @@ func TestFlagPosition_cost_help_matches_file_RT11_16(t *testing.T) {
 	}
 }
 
-// RT-11.17: load-prompt.filter results in --query=<value> appended to the fzf
-// invocation. Approach: place a stub named 'fzf' on PATH that logs argv, then
-// assert --query=<filter> appears.
+// RT-11.17: 🚫 REMOVED -- superseded by issue #15 / RT-15.4.
+// Original behaviour: prompt-picker.filter passed as fzf --query=<value>.
+// New behaviour: filter is a regex applied at pix layer; non-matching files
+// are dropped before fzf sees them. --query is no longer used.
 func TestFlagPosition_load_prompt_filter_fzf_query_RT11_17(t *testing.T) {
-	bin := buildBinary(t)
-	promptsDir := t.TempDir()
-	writePromptFile(t, promptsDir, "p1.md", "filtered prompt")
-
-	// Create a binary in a tempdir literally named 'fzf' that logs argv and picks first.
-	pickerBinDir := t.TempDir()
-	pickerScript := filepath.Join(pickerBinDir, "fzf")
-	argvLog := filepath.Join(pickerBinDir, "argv.log")
-	body := "#!/bin/sh\nprintf '%s\\n' \"$@\" > " + argvLog + "\nhead -n 1\n"
-	if err := os.WriteFile(pickerScript, []byte(body), 0755); err != nil {
-		t.Fatalf("failed to write fzf stub: %v", err)
-	}
-
-	cfg := "model: fal-ai/grok-2-aurora\ninteractive:\n  picker: fzf\n" +
-		"  prompt-picker:\n    filter: image\n" +
-		"  load-prompt:\n    path: " + promptsDir + "\n"
-	binPath := setupEnvWithConfig(t, bin, "FAL_KEY=test\n", cfg)
-
-	imageServer := newImageServer(t, fakeImagePNG, "image/png")
-	server := startFakeAPI(t, successHandler(t, imageServer, nil), nil)
-
-	outFile := filepath.Join(t.TempDir(), "out.png")
-	// PATH override puts our stub fzf first.
-	_, stderr, exitCode := runBinary(t, binPath, []string{"--load-prompt", "gen", outFile}, "\n",
-		ttyEnv("FAL_BASE_URL="+server.URL, "PATH="+pickerBinDir+":/usr/bin:/bin"))
-
-	if exitCode != 0 {
-		t.Fatalf("expected exit 0, got %d; stderr: %s", exitCode, stderr)
-	}
-	logged, err := os.ReadFile(argvLog)
-	if err != nil {
-		t.Fatalf("failed to read picker argv log: %v", err)
-	}
-	if !strings.Contains(string(logged), "--query=") || !strings.Contains(string(logged), "image") {
-		t.Errorf("expected --query=...image... in fzf args, got: %q", string(logged))
-	}
+	t.Skip("Superseded by issue #15 -- prompt-picker.filter is now a regex pre-filter; see RT-15.4")
 }
 
-// RT-11.18: model-picker.filter is passed to the picker as --query=<value>.
+// RT-11.18: 🚫 REMOVED -- superseded by issue #15 / RT-15.5.
+// Original behaviour: model-picker.filter passed as fzf --query=<value>.
+// New behaviour: filter is a regex applied at pix layer; non-matching models
+// are dropped before fzf sees them. --query is no longer used.
 func TestFlagPosition_model_picker_filter_fzf_query_RT11_18(t *testing.T) {
-	bin := buildBinary(t)
-
-	pickerBinDir := t.TempDir()
-	pickerScript := filepath.Join(pickerBinDir, "fzf")
-	argvLog := filepath.Join(pickerBinDir, "argv.log")
-	body := "#!/bin/sh\nprintf '%s\\n' \"$@\" > " + argvLog + "\nhead -n 1\n"
-	if err := os.WriteFile(pickerScript, []byte(body), 0755); err != nil {
-		t.Fatalf("failed to write fzf stub: %v", err)
-	}
-
-	cfg := "model: fal-ai/grok-2-aurora\ninteractive:\n  picker: fzf\n" +
-		"  model-picker:\n    filter: flux\n"
-	binPath := setupEnvWithConfig(t, bin, "FAL_KEY=test\n", cfg)
-
-	imageServer := newImageServer(t, fakeImagePNG, "image/png")
-	server := startFakeAPIWithModels(t,
-		successHandler(t, imageServer, nil), nil,
-		func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(fakeModelsResponse([]string{"fal-ai/flux/dev", "fal-ai/other"}, "text-to-image")))
-		})
-
-	outFile := filepath.Join(t.TempDir(), "out.png")
-	_, stderr, exitCode := runBinary(t, binPath, []string{"gen", "--pick-model", outFile}, "a prompt",
-		ttyEnv("FAL_BASE_URL="+server.URL, "PATH="+pickerBinDir+":/usr/bin:/bin"))
-
-	if exitCode != 0 {
-		t.Fatalf("expected exit 0, got %d; stderr: %s", exitCode, stderr)
-	}
-	logged, err := os.ReadFile(argvLog)
-	if err != nil {
-		t.Fatalf("failed to read picker argv log: %v", err)
-	}
-	if !strings.Contains(string(logged), "--query=") || !strings.Contains(string(logged), "flux") {
-		t.Errorf("expected --query=...flux... in fzf args, got: %q", string(logged))
-	}
+	t.Skip("Superseded by issue #15 -- model-picker.filter is now a regex pre-filter; see RT-15.5")
 }
 
 // --- interactive config refactor + preselect (issue #12) ---
@@ -3959,63 +3893,20 @@ func TestInteractive_promptpicker_always_piped_bypass_RT12_6(t *testing.T) {
 	}
 }
 
-// RT-12.7: prompt-picker.filter passes --query to fzf.
+// RT-12.7: 🚫 REMOVED -- superseded by issue #15 / RT-15.4.
+// Original behaviour: prompt-picker.filter passed as fzf --query.
+// New behaviour: filter is a regex applied at pix layer; non-matching files
+// are dropped before fzf sees them.
 func TestInteractive_promptpicker_filter_passes_RT12_7(t *testing.T) {
-	bin := buildBinary(t)
-	binDir, argvLog := fzfArgvStubDir(t)
-
-	promptsDir := t.TempDir()
-	writePromptFile(t, promptsDir, "p1.md", "x")
-
-	cfg := "model: fal-ai/grok-2-aurora\ninteractive:\n  picker: fzf\n" +
-		"  prompt-picker:\n    filter: image\n" +
-		"  load-prompt:\n    path: " + promptsDir + "\n"
-	binPath := setupEnvWithConfig(t, bin, "FAL_KEY=test\n", cfg)
-
-	imageServer := newImageServer(t, fakeImagePNG, "image/png")
-	server := startFakeAPI(t, successHandler(t, imageServer, nil), nil)
-
-	outFile := filepath.Join(t.TempDir(), "out.png")
-	runBinary(t, binPath, []string{"gen", "--load-prompt", outFile}, "\n",
-		ttyEnv("FAL_BASE_URL="+server.URL, "PATH="+binDir+":/usr/bin:/bin"))
-
-	logged, err := os.ReadFile(argvLog)
-	if err != nil {
-		t.Fatalf("read argv log: %v", err)
-	}
-	if !strings.Contains(string(logged), "--query=") || !strings.Contains(string(logged), "image") {
-		t.Errorf("expected --query=image in fzf args, got: %q", string(logged))
-	}
+	t.Skip("Superseded by issue #15 -- prompt-picker.filter is now a regex pre-filter; see RT-15.4")
 }
 
-// RT-12.8: prompt-picker.filter empty -> no --query argument.
+// RT-12.8: 🚫 REMOVED -- superseded by issue #15 / RT-15.4.
+// Original behaviour: empty filter -> no --query.
+// New behaviour: filter is a pre-filter at pix layer; --query is never used
+// regardless of filter value. RT-15.4 covers the pre-filtering behaviour.
 func TestInteractive_promptpicker_filter_empty_no_query_RT12_8(t *testing.T) {
-	bin := buildBinary(t)
-	binDir, argvLog := fzfArgvStubDir(t)
-
-	promptsDir := t.TempDir()
-	writePromptFile(t, promptsDir, "p1.md", "x")
-
-	// prompt-picker block present but no filter.
-	cfg := "model: fal-ai/grok-2-aurora\ninteractive:\n  picker: fzf\n" +
-		"  prompt-picker: {}\n" +
-		"  load-prompt:\n    path: " + promptsDir + "\n"
-	binPath := setupEnvWithConfig(t, bin, "FAL_KEY=test\n", cfg)
-
-	imageServer := newImageServer(t, fakeImagePNG, "image/png")
-	server := startFakeAPI(t, successHandler(t, imageServer, nil), nil)
-
-	outFile := filepath.Join(t.TempDir(), "out.png")
-	runBinary(t, binPath, []string{"gen", "--load-prompt", outFile}, "\n",
-		ttyEnv("FAL_BASE_URL="+server.URL, "PATH="+binDir+":/usr/bin:/bin"))
-
-	logged, err := os.ReadFile(argvLog)
-	if err != nil {
-		t.Fatalf("read argv log: %v", err)
-	}
-	if strings.Contains(string(logged), "--query=") {
-		t.Errorf("expected NO --query when filter empty, got: %q", string(logged))
-	}
+	t.Skip("Superseded by issue #15 -- --query is no longer used; see RT-15.4")
 }
 
 // RT-12.9: model-picker.preselect matching a model puts it first in the candidate list.
@@ -4404,5 +4295,167 @@ func TestPickers_both_cancel_fall_through_RT15_3(t *testing.T) {
 	}
 	if _, err := os.Stat(outFile); err != nil {
 		t.Errorf("expected output file written: %v", err)
+	}
+}
+
+// --- filter as regex pre-filter (issue #15, second half) ---
+
+// RT-15.4: prompt-picker.filter regex narrows the file list before fzf sees it.
+func TestPickers_prompt_filter_prefilters_RT15_4(t *testing.T) {
+	bin := buildBinary(t)
+	binDir, stdinLog := fzfStdinLoggerDir(t)
+
+	promptsDir := t.TempDir()
+	writePromptFile(t, promptsDir, "garden.md", "g")
+	writePromptFile(t, promptsDir, "image-1.md", "i1")
+	writePromptFile(t, promptsDir, "image-2.md", "i2")
+	writePromptFile(t, promptsDir, "sunset.md", "s")
+
+	cfg := "model: fal-ai/grok-2-aurora\ninteractive:\n  picker: fzf\n" +
+		"  prompt-picker:\n    filter: image\n" +
+		"  load-prompt:\n    path: " + promptsDir + "\n"
+	binPath := setupEnvWithConfig(t, bin, "FAL_KEY=test\n", cfg)
+
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPI(t, successHandler(t, imageServer, nil), nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	runBinary(t, binPath, []string{"gen", "--load-prompt", outFile}, "\n",
+		ttyEnv("FAL_BASE_URL="+server.URL, "PATH="+binDir+":/usr/bin:/bin"))
+
+	candidates, err := os.ReadFile(stdinLog)
+	if err != nil {
+		t.Fatalf("read stdin log: %v", err)
+	}
+	got := string(candidates)
+	if !strings.Contains(got, "image-1.md") || !strings.Contains(got, "image-2.md") {
+		t.Errorf("expected image-1 and image-2 in fzf stdin, got: %q", got)
+	}
+	if strings.Contains(got, "garden.md") || strings.Contains(got, "sunset.md") {
+		t.Errorf("expected non-matching files dropped before fzf, got: %q", got)
+	}
+}
+
+// RT-15.5: model-picker.filter regex narrows the candidate list before fzf sees it.
+func TestPickers_model_filter_prefilters_RT15_5(t *testing.T) {
+	bin := buildBinary(t)
+	binDir, stdinLog := fzfStdinLoggerDir(t)
+
+	cfg := "model: fal-ai/grok-2-aurora\ninteractive:\n  picker: fzf\n" +
+		"  model-picker:\n    filter: ^xai/\n"
+	binPath := setupEnvWithConfig(t, bin, "FAL_KEY=test\n", cfg)
+
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPIWithModels(t,
+		successHandler(t, imageServer, nil), nil,
+		func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(fakeModelsResponse([]string{
+				"fal-ai/aaa", "xai/a", "xai/b", "fal-ai/zzz",
+			}, "text-to-image")))
+		})
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	runBinary(t, binPath, []string{"gen", "--pick-model", outFile}, "a prompt",
+		ttyEnv("FAL_BASE_URL="+server.URL, "PATH="+binDir+":/usr/bin:/bin"))
+
+	candidates, err := os.ReadFile(stdinLog)
+	if err != nil {
+		t.Fatalf("read stdin log: %v", err)
+	}
+	got := string(candidates)
+	if !strings.Contains(got, "xai/a") || !strings.Contains(got, "xai/b") {
+		t.Errorf("expected xai/a and xai/b in fzf stdin, got: %q", got)
+	}
+	if strings.Contains(got, "fal-ai/") {
+		t.Errorf("expected fal-ai entries dropped before fzf, got: %q", got)
+	}
+}
+
+// RT-15.6: invalid regex on prompt-picker.filter warns and proceeds unfiltered.
+func TestPickers_prompt_filter_invalid_regex_RT15_6(t *testing.T) {
+	bin := buildBinary(t)
+	binDir, stdinLog := fzfStdinLoggerDir(t)
+
+	promptsDir := t.TempDir()
+	writePromptFile(t, promptsDir, "p1.md", "x")
+	writePromptFile(t, promptsDir, "p2.md", "y")
+
+	cfg := "model: fal-ai/grok-2-aurora\ninteractive:\n  picker: fzf\n" +
+		"  prompt-picker:\n    filter: \"[invalid\"\n" +
+		"  load-prompt:\n    path: " + promptsDir + "\n"
+	binPath := setupEnvWithConfig(t, bin, "FAL_KEY=test\n", cfg)
+
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPI(t, successHandler(t, imageServer, nil), nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	_, stderr, _ := runBinary(t, binPath, []string{"gen", "--load-prompt", outFile}, "\n",
+		ttyEnv("FAL_BASE_URL="+server.URL, "PATH="+binDir+":/usr/bin:/bin"))
+
+	if !strings.Contains(strings.ToLower(stderr), "not a valid regex") {
+		t.Errorf("expected stderr warning about invalid regex, got: %q", stderr)
+	}
+	candidates, err := os.ReadFile(stdinLog)
+	if err != nil {
+		t.Fatalf("read stdin log: %v", err)
+	}
+	got := string(candidates)
+	if !strings.Contains(got, "p1.md") || !strings.Contains(got, "p2.md") {
+		t.Errorf("expected unfiltered list on invalid regex, got: %q", got)
+	}
+}
+
+// RT-15.7: prompt-picker.filter matching zero files exits non-zero with explanation.
+func TestPickers_prompt_filter_empty_result_errors_RT15_7(t *testing.T) {
+	bin := buildBinary(t)
+	binDir, _ := fzfStdinLoggerDir(t)
+
+	promptsDir := t.TempDir()
+	writePromptFile(t, promptsDir, "garden.md", "g")
+	writePromptFile(t, promptsDir, "sunset.md", "s")
+
+	cfg := "model: fal-ai/grok-2-aurora\ninteractive:\n  picker: fzf\n" +
+		"  prompt-picker:\n    filter: nonexistent-substring-xyzzy\n" +
+		"  load-prompt:\n    path: " + promptsDir + "\n"
+	binPath := setupEnvWithConfig(t, bin, "FAL_KEY=test\n", cfg)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	_, stderr, exitCode := runBinary(t, binPath, []string{"gen", "--load-prompt", outFile}, "\n",
+		ttyEnv("PATH="+binDir+":/usr/bin:/bin"))
+
+	if exitCode == 0 {
+		t.Errorf("expected non-zero exit when filter matches zero prompts, got 0")
+	}
+	if !strings.Contains(strings.ToLower(stderr), "no prompts match") {
+		t.Errorf("expected 'no prompts match' in stderr, got: %q", stderr)
+	}
+}
+
+// RT-15.8: model-picker.filter matching zero models exits non-zero with explanation.
+func TestPickers_model_filter_empty_result_errors_RT15_8(t *testing.T) {
+	bin := buildBinary(t)
+	binDir, _ := fzfStdinLoggerDir(t)
+
+	cfg := "model: fal-ai/grok-2-aurora\ninteractive:\n  picker: fzf\n" +
+		"  model-picker:\n    filter: nonexistent-vendor-xyzzy\n"
+	binPath := setupEnvWithConfig(t, bin, "FAL_KEY=test\n", cfg)
+
+	server := startFakeAPIWithModels(t,
+		func(w http.ResponseWriter, r *http.Request) {}, nil,
+		func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(fakeModelsResponse([]string{"fal-ai/aaa", "fal-ai/bbb"}, "text-to-image")))
+		})
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	_, stderr, exitCode := runBinary(t, binPath, []string{"gen", "--pick-model", outFile}, "a prompt",
+		ttyEnv("FAL_BASE_URL="+server.URL, "PATH="+binDir+":/usr/bin:/bin"))
+
+	if exitCode == 0 {
+		t.Errorf("expected non-zero exit when filter matches zero models, got 0")
+	}
+	if !strings.Contains(strings.ToLower(stderr), "no models match") {
+		t.Errorf("expected 'no models match' in stderr, got: %q", stderr)
 	}
 }

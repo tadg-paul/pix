@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -55,6 +56,27 @@ func runLoadPromptFlow(cfg *config, globalQuiet bool) (*loadPromptResult, error)
 		return nil, fmt.Errorf("load-prompt directory %s contains no prompt files (empty)", lp.Path)
 	}
 
+	// prompt-picker.filter is a regex applied at the pix layer BEFORE fzf sees
+	// the candidate list. Non-matching files are dropped so the picker shows
+	// only relevant entries. Invalid regex warns and proceeds unfiltered.
+	if filter := cfg.Interactive.PromptPicker.Filter; filter != "" {
+		re, rerr := regexp.Compile(filter)
+		if rerr != nil {
+			fmt.Fprintf(os.Stderr, "Warning: prompt-picker.filter %q is not a valid regex: %v (proceeding without filter)\n", filter, rerr)
+		} else {
+			kept := make([]string, 0, len(files))
+			for _, f := range files {
+				if re.MatchString(f) {
+					kept = append(kept, f)
+				}
+			}
+			if len(kept) == 0 {
+				return nil, fmt.Errorf("no prompts match filter %q (directory: %s)", filter, lp.Path)
+			}
+			files = kept
+		}
+	}
+
 	// Display basename only -- the full path is ugly in the list and hard to scan.
 	// Trick: set delimiter to '/' and ask fzf to display only the last field
 	// (--with-nth=-1). fzf's {} placeholder in --preview still resolves to the
@@ -66,9 +88,6 @@ func runLoadPromptFlow(cfg *config, globalQuiet bool) (*loadPromptResult, error)
 		`--with-nth=-1`,
 		`--preview='cat {}'`,
 		`--preview-window=right:60%:wrap`,
-	}
-	if cfg.Interactive.PromptPicker.Filter != "" {
-		fzfArgs = append(fzfArgs, "--query="+shellQuote(cfg.Interactive.PromptPicker.Filter))
 	}
 	selected, cancelled, err := invokePicker(picker, files, fzfArgs...)
 	if err != nil {

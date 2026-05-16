@@ -67,6 +67,27 @@ func runModelPickerFlow(cfg *config, falKey string, hasRefs bool) (string, bool,
 		return "", false, fmt.Errorf("FAL /v1/models returned no models for category=%s", category)
 	}
 
+	// model-picker.filter is a regex applied at the pix layer BEFORE fzf sees
+	// the candidate list. Non-matching models are dropped. Invalid regex warns
+	// and proceeds unfiltered.
+	if filter := cfg.Interactive.ModelPicker.Filter; filter != "" {
+		re, rerr := regexp.Compile(filter)
+		if rerr != nil {
+			fmt.Fprintf(os.Stderr, "Warning: model-picker.filter %q is not a valid regex: %v (proceeding without filter)\n", filter, rerr)
+		} else {
+			kept := make([]modelEntry, 0, len(models))
+			for _, m := range models {
+				if re.MatchString(m.EndpointID) {
+					kept = append(kept, m)
+				}
+			}
+			if len(kept) == 0 {
+				return "", false, fmt.Errorf("no models match filter %q for category=%s", filter, category)
+			}
+			models = kept
+		}
+	}
+
 	// Each candidate line is just the endpoint_id -- a clean list, easy to scan
 	// and search. Model metadata is written to per-model files in a tempdir, so
 	// fzf's preview pane can show prettified details for whichever line the user
@@ -97,9 +118,6 @@ func runModelPickerFlow(cfg *config, falKey string, hasRefs bool) (string, bool,
 		headerArg,
 		previewArg,
 		"--preview-window=right:60%:wrap",
-	}
-	if cfg.Interactive.ModelPicker.Filter != "" {
-		fzfArgs = append(fzfArgs, "--query="+shellQuote(cfg.Interactive.ModelPicker.Filter))
 	}
 	selected, cancelled, err := invokePicker(picker, candidates, fzfArgs...)
 	if err != nil {
