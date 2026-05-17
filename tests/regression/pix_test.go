@@ -5070,3 +5070,207 @@ func TestModelRouter_default_no_safety_RT18_13(t *testing.T) {
 		t.Errorf("default family must not set enable_safety_checker; got: %v", parsed)
 	}
 }
+
+// --- T2I parity, sizing, output_format, num_images (discovery #18) ---
+
+// RT-18.14: kontext T2I (no refs) appends /text-to-image suffix.
+func TestT2I_kontext_endpoint_suffix_RT18_14(t *testing.T) {
+	bin := buildBinary(t)
+	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/flux-pro/kontext\n")
+
+	var capturedPath string
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPI(t, func(w http.ResponseWriter, r *http.Request) {
+		capturedPath = r.URL.Path
+		resp := map[string]interface{}{
+			"images": []map[string]interface{}{{"url": imageServer.URL + "/i.png"}},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}, nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	runBinary(t, binPath, []string{"gen", outFile}, "a prompt",
+		[]string{"FAL_BASE_URL=" + server.URL})
+
+	if !strings.HasSuffix(capturedPath, "/text-to-image") {
+		t.Errorf("expected kontext T2I to suffix /text-to-image; got: %q", capturedPath)
+	}
+}
+
+// RT-18.15: ideogram-v3 payload includes style: "AUTO".
+func TestT2I_ideogram_v3_required_style_RT18_15(t *testing.T) {
+	bin := buildBinary(t)
+	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/ideogram/v3\n")
+
+	var capturedBody string
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPI(t, successHandler(t, imageServer, &capturedBody), nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	runBinary(t, binPath, []string{"gen", outFile}, "a prompt",
+		[]string{"FAL_BASE_URL=" + server.URL})
+
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(capturedBody), &parsed); err != nil {
+		t.Fatalf("parse body: %v", err)
+	}
+	if got, _ := parsed["style"].(string); got != "AUTO" {
+		t.Errorf("expected style=\"AUTO\" for ideogram-v3, got: %v", parsed["style"])
+	}
+}
+
+// RT-18.16: --size flag overrides ref-inferred aspect ratio.
+func TestT2I_size_flag_overrides_RT18_16(t *testing.T) {
+	bin := buildBinary(t)
+	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/flux-2\n")
+
+	var capturedBody string
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPI(t, successHandler(t, imageServer, &capturedBody), nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	runBinary(t, binPath, []string{"gen", "--size", "9:16", outFile}, "a prompt",
+		[]string{"FAL_BASE_URL=" + server.URL})
+
+	var parsed map[string]interface{}
+	json.Unmarshal([]byte(capturedBody), &parsed)
+	if got, _ := parsed["image_size"].(string); got != "portrait_16_9" {
+		t.Errorf("expected image_size=portrait_16_9 for --size 9:16 on flux-2, got: %v", parsed["image_size"])
+	}
+}
+
+// RT-18.17: aspect ratio inferred from ref dimensions when no --size set.
+// fakeImagePNG is 1x1 -> snaps to 1:1 -> square_hd for image_size family.
+func TestT2I_size_inferred_from_ref_RT18_17(t *testing.T) {
+	bin := buildBinary(t)
+	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/flux-2\n")
+
+	refDir := t.TempDir()
+	refPath := writeRefImage(t, refDir, "ref.png", fakeImagePNG) // 1x1 PNG -> 1:1
+
+	var capturedBody string
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPI(t, successHandler(t, imageServer, &capturedBody), nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	runBinary(t, binPath, []string{"gen", refPath, outFile}, "a prompt",
+		[]string{"FAL_BASE_URL=" + server.URL})
+
+	var parsed map[string]interface{}
+	json.Unmarshal([]byte(capturedBody), &parsed)
+	if got, _ := parsed["image_size"].(string); got != "square_hd" {
+		t.Errorf("expected image_size=square_hd inferred from 1x1 ref, got: %v", parsed["image_size"])
+	}
+}
+
+// RT-18.18: aspect_ratio-strategy family gets raw W:H passthrough.
+func TestT2I_aspect_ratio_strategy_RT18_18(t *testing.T) {
+	bin := buildBinary(t)
+	binPath := setupEnv(t, bin, "test-key", "model: xai/grok-imagine-image\n")
+
+	var capturedBody string
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPI(t, successHandler(t, imageServer, &capturedBody), nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	runBinary(t, binPath, []string{"gen", "--size=16:9", outFile}, "a prompt",
+		[]string{"FAL_BASE_URL=" + server.URL})
+
+	var parsed map[string]interface{}
+	json.Unmarshal([]byte(capturedBody), &parsed)
+	if got, _ := parsed["aspect_ratio"].(string); got != "16:9" {
+		t.Errorf("expected aspect_ratio=\"16:9\" for grok, got: %v", parsed["aspect_ratio"])
+	}
+}
+
+// RT-18.19: pixel-strategy family gets explicit WIDTHxHEIGHT.
+func TestT2I_pixel_strategy_RT18_19(t *testing.T) {
+	bin := buildBinary(t)
+	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/gpt-image-1.5\n")
+
+	var capturedBody string
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPI(t, successHandler(t, imageServer, &capturedBody), nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	runBinary(t, binPath, []string{"gen", "--size", "1:1", outFile}, "a prompt",
+		[]string{"FAL_BASE_URL=" + server.URL})
+
+	var parsed map[string]interface{}
+	json.Unmarshal([]byte(capturedBody), &parsed)
+	if got, _ := parsed["image_size"].(string); got != "1024x1024" {
+		t.Errorf("expected image_size=\"1024x1024\" for gpt-image, got: %v", parsed["image_size"])
+	}
+}
+
+// RT-18.20: output_format derived from output filename extension.
+func TestT2I_output_format_from_filename_RT18_20(t *testing.T) {
+	bin := buildBinary(t)
+	cases := []struct {
+		filename string
+		expected string
+	}{
+		{"out.png", "png"},
+		{"out.jpg", "jpeg"},
+		{"out.jpeg", "jpeg"},
+		{"out.webp", "webp"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.expected, func(t *testing.T) {
+			binPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
+
+			var capturedBody string
+			imageServer := newImageServer(t, fakeImagePNG, "image/png")
+			server := startFakeAPI(t, successHandler(t, imageServer, &capturedBody), nil)
+
+			outFile := filepath.Join(t.TempDir(), tc.filename)
+			runBinary(t, binPath, []string{"gen", outFile}, "a prompt",
+				[]string{"FAL_BASE_URL=" + server.URL})
+
+			var parsed map[string]interface{}
+			json.Unmarshal([]byte(capturedBody), &parsed)
+			if got, _ := parsed["output_format"].(string); got != tc.expected {
+				t.Errorf("[%s] expected output_format=%q, got: %v", tc.filename, tc.expected, parsed["output_format"])
+			}
+		})
+	}
+}
+
+// RT-18.21: num_images: 1 always sent.
+func TestT2I_num_images_RT18_21(t *testing.T) {
+	bin := buildBinary(t)
+	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
+
+	var capturedBody string
+	imageServer := newImageServer(t, fakeImagePNG, "image/png")
+	server := startFakeAPI(t, successHandler(t, imageServer, &capturedBody), nil)
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	runBinary(t, binPath, []string{"gen", outFile}, "a prompt",
+		[]string{"FAL_BASE_URL=" + server.URL})
+
+	var parsed map[string]interface{}
+	json.Unmarshal([]byte(capturedBody), &parsed)
+	n, ok := parsed["num_images"].(float64) // JSON numbers decode as float64
+	if !ok || int(n) != 1 {
+		t.Errorf("expected num_images=1, got: %v", parsed["num_images"])
+	}
+}
+
+// RT-18.22: invalid --size value errors.
+func TestT2I_size_flag_invalid_RT18_22(t *testing.T) {
+	bin := buildBinary(t)
+	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/flux-2\n")
+
+	outFile := filepath.Join(t.TempDir(), "out.png")
+	_, stderr, exitCode := runBinary(t, binPath, []string{"gen", "--size", "garbage", outFile},
+		"a prompt", nil)
+
+	if exitCode == 0 {
+		t.Errorf("expected non-zero exit for invalid --size, got 0")
+	}
+	if !strings.Contains(strings.ToLower(stderr), "size") {
+		t.Errorf("expected error mentioning size, got: %q", stderr)
+	}
+}

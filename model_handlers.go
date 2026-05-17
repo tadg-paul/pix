@@ -21,119 +21,168 @@ type modelHandler struct {
 	Patterns []string
 
 	// RefField: the JSON key under which reference image URIs are sent to FAL.
-	// "image_url" (singular) sends the first ref as a string value.
-	// "image_urls" (plural, default) sends all refs as an array.
+	// "image_url" / "reference_image_url" (singular) send first ref as string.
+	// "image_urls" / "reference_image_urls" (plural) send all refs as array.
 	RefField string
 
 	// SafetyDefaults: keys/values merged into every request payload for this
-	// family. Pix is for private use; we default to safety-off wherever the
-	// model offers a knob, to avoid spurious rejections (e.g. nano-banana
-	// flagging an aerial sketch because it contains a school). Per-family
-	// values mirror storyboard-gen's StillHandler safety_defaults.
+	// family. Pix is for private use; default to safety-off wherever the
+	// model offers a knob (mirrors storyboard-gen safety_defaults).
 	SafetyDefaults map[string]interface{}
+
+	// Sizing: how the model wants the aspect-ratio/size expressed.
+	//   "image_size"   -- FAL preset string ("landscape_16_9" etc.)
+	//   "aspect_ratio" -- raw "W:H" passthrough
+	//   "pixel"        -- explicit "WIDTHxHEIGHT" string
+	//   ""             -- model has no sizing knob; nothing is sent
+	Sizing string
+
+	// T2IEndpointSuffix: appended to cfg.Model when generating WITHOUT refs.
+	// Used by kontext, where the base endpoint is the i2i path; "/text-to-image"
+	// is required for prompt-only generation. Empty for the common case where
+	// the base endpoint IS the t2i path.
+	T2IEndpointSuffix string
+
+	// RequiredFields: keys/values that the model demands in every payload.
+	// Example: ideogram models require {"style": "AUTO"}; without it FAL 422s.
+	// Distinct from SafetyDefaults so the intent at the call site is clear.
+	RequiredFields map[string]interface{}
 }
 
 // modelHandlers is the dispatch table. Order matters: more-specific patterns
 // first; the final entry (empty patterns) is the default that always matches.
 var modelHandlers = []modelHandler{
-	// Kontext multi (max/multi): plural image_urls. Must come BEFORE the
-	// general kontext rule so the multi variant doesn't get caught by it.
-	// Mirrors storyboard-gen KontextMultiHandler.
+	// Kontext multi (max/multi): plural image_urls.
 	{
 		Patterns:       []string{"kontext/max/multi"},
 		RefField:       "image_urls",
 		SafetyDefaults: map[string]interface{}{"safety_tolerance": "6"},
+		Sizing:         "aspect_ratio",
 	},
 
-	// Kontext family (single-ref variants): singular image_url, safety_tolerance
-	// maxed. Mirrors storyboard-gen KontextHandler.
+	// Kontext family (single-ref variants): singular image_url. The base
+	// endpoint is the i2i path; T2I needs the "/text-to-image" suffix.
 	{
-		Patterns:       []string{"kontext"},
-		RefField:       "image_url",
-		SafetyDefaults: map[string]interface{}{"safety_tolerance": "6"},
+		Patterns:          []string{"kontext"},
+		RefField:          "image_url",
+		SafetyDefaults:    map[string]interface{}{"safety_tolerance": "6"},
+		Sizing:            "image_size",
+		T2IEndpointSuffix: "/text-to-image",
 	},
 
-	// Ideogram Character: pix maps its single ref set onto the character
-	// channel (reference_image_urls). The model's separate style-refs channel
-	// (image_urls) is left empty -- pix has no style-refs concept.
-	// Mirrors storyboard-gen IdeogramCharacterHandler._build_ideogram_character_args.
+	// Ideogram Character: refs go to the character channel
+	// (reference_image_urls). Style channel left empty (pix has no style-ref
+	// concept). Requires style: "AUTO".
 	{
-		Patterns: []string{"ideogram/character"},
-		RefField: "reference_image_urls",
+		Patterns:       []string{"ideogram/character"},
+		RefField:       "reference_image_urls",
+		Sizing:         "image_size",
+		RequiredFields: map[string]interface{}{"style": "AUTO"},
 	},
 
-	// Flux 1.x specifically with reference_image_url support. Mirrors
-	// storyboard-gen FluxHandler._build_flux_args (only flux-general uses
-	// the reference_image_url field; other flux 1.x variants drop refs).
+	// Ideogram V3: typography model. No refs. Required style: "AUTO".
+	{
+		Patterns:       []string{"ideogram/v3"},
+		RefField:       "image_urls", // unused -- v3 has no ref support, but a value is required by the struct
+		Sizing:         "image_size",
+		RequiredFields: map[string]interface{}{"style": "AUTO"},
+	},
+
+	// Flux 1.x flux-general: singular reference_image_url.
 	{
 		Patterns:       []string{"flux-general"},
 		RefField:       "reference_image_url",
 		SafetyDefaults: map[string]interface{}{"enable_safety_checker": false},
+		Sizing:         "image_size",
 	},
 
-	// Reve family: singular image_url. No documented safety knob.
+	// Reve and reve/fast/remix: singular image_url, aspect_ratio sizing.
 	{
 		Patterns: []string{"reve"},
 		RefField: "image_url",
+		Sizing:   "aspect_ratio",
 	},
 
-	// Emu 3.5 image: singular image_url. No documented safety knob.
+	// Emu 3.5 image: singular image_url, aspect_ratio sizing.
 	{
 		Patterns: []string{"emu-3.5"},
 		RefField: "image_url",
+		Sizing:   "aspect_ratio",
 	},
 
-	// Flux 2 family (incl. pro / max): safety checker off.
+	// Nano Banana: plural image_urls, aspect_ratio sizing.
+	{
+		Patterns: []string{"nano-banana"},
+		RefField: "image_urls",
+		Sizing:   "aspect_ratio",
+	},
+
+	// GPT Image: plural image_urls, pixel sizing.
+	{
+		Patterns: []string{"gpt-image"},
+		RefField: "image_urls",
+		Sizing:   "pixel",
+	},
+
+	// Grok Image (xAI): plural image_urls, aspect_ratio sizing.
+	{
+		Patterns: []string{"grok-imagine-image"},
+		RefField: "image_urls",
+		Sizing:   "aspect_ratio",
+	},
+
+	// Flux 2 family (incl. pro / max): plural image_urls, image_size preset.
 	{
 		Patterns:       []string{"flux-2"},
 		RefField:       "image_urls",
 		SafetyDefaults: map[string]interface{}{"enable_safety_checker": false},
+		Sizing:         "image_size",
 	},
 
-	// Seedream (ByteDance): safety checker off.
+	// Seedream (ByteDance): plural image_urls, image_size preset.
 	{
 		Patterns:       []string{"seedream"},
 		RefField:       "image_urls",
 		SafetyDefaults: map[string]interface{}{"enable_safety_checker": false},
+		Sizing:         "image_size",
 	},
 
-	// Hunyuan Image (Tencent): safety checker off.
+	// Hunyuan Image (Tencent): plural image_urls, image_size preset.
 	{
 		Patterns:       []string{"hunyuan-image"},
 		RefField:       "image_urls",
 		SafetyDefaults: map[string]interface{}{"enable_safety_checker": false},
+		Sizing:         "image_size",
 	},
 
-	// Recraft: safety checker off.
+	// Recraft: plural image_urls, image_size preset.
 	{
 		Patterns:       []string{"recraft"},
 		RefField:       "image_urls",
 		SafetyDefaults: map[string]interface{}{"enable_safety_checker": false},
+		Sizing:         "image_size",
 	},
 
-	// Instant Character: safety checker off (per storyboard-gen
-	// InstantCharacterHandler.safety_defaults).
+	// Instant Character: singular image_url, image_size preset.
 	{
 		Patterns:       []string{"instant-character"},
 		RefField:       "image_url",
 		SafetyDefaults: map[string]interface{}{"enable_safety_checker": false},
+		Sizing:         "image_size",
 	},
 
-	// Flux 1.x family (fallback before the catch-all): safety checker off
-	// (per storyboard-gen FluxHandler.safety_defaults). Use a narrow pattern
-	// so this doesn't shadow more specific entries.
+	// Flux 1.x other variants (fallback before catch-all): image_size preset.
 	{
-		Patterns:       []string{"flux-general", "flux-pro/v1", "flux/dev"},
+		Patterns:       []string{"flux-pro/v1", "flux/dev"},
 		RefField:       "image_urls",
 		SafetyDefaults: map[string]interface{}{"enable_safety_checker": false},
+		Sizing:         "image_size",
 	},
 
-	// Default: plural image_urls, no safety knob assumed. Covers grok,
-	// glm-image, nano-banana, gpt-image-1.5, firered, qwen, ideogram, and
-	// anything new pix hasn't profiled yet. Models with a known but
-	// non-standard safety knob can be promoted to their own entry above.
+	// Default: plural image_urls, no sizing field passed. Covers everything
+	// pix hasn't profiled. New families can be promoted up the list.
 	{
-		Patterns: nil, // empty -> always matches; must remain last
+		Patterns: nil, // must remain last
 		RefField: "image_urls",
 	},
 }

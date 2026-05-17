@@ -35,24 +35,36 @@ func runGenImg(args []string, globalQuiet bool, subcommandName string) int {
 	noLoadPromptFlag := false
 	pickModelFlag := false
 	noPickModelFlag := false
+	sizeFlag := ""
 	var positionals []string
 
 	// Note: -q/--quiet and -h/--help are consumed by main.go's top-level parser
 	// before this handler is called; they should never reach this loop.
-	for _, arg := range args {
-		switch arg {
-		case "--dry-run":
+	// Index-based loop so --size <value> can consume the following arg.
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case arg == "--dry-run":
 			dryRun = true
-		case "-p", "--preview":
+		case arg == "-p" || arg == "--preview":
 			preview = true
-		case "--load-prompt":
+		case arg == "--load-prompt":
 			loadPromptFlag = true
-		case "--no-load-prompt":
+		case arg == "--no-load-prompt":
 			noLoadPromptFlag = true
-		case "--pick-model":
+		case arg == "--pick-model":
 			pickModelFlag = true
-		case "--no-pick-model":
+		case arg == "--no-pick-model":
 			noPickModelFlag = true
+		case arg == "--size":
+			if i+1 >= len(args) {
+				fmt.Fprintln(os.Stderr, "Error: --size requires a value (e.g. 16:9 or 1024x1024)")
+				return 2
+			}
+			i++
+			sizeFlag = args[i]
+		case strings.HasPrefix(arg, "--size="):
+			sizeFlag = strings.TrimPrefix(arg, "--size=")
 		default:
 			if strings.HasPrefix(arg, "-") {
 				fmt.Fprintf(os.Stderr, "Unknown flag: %s\n", arg)
@@ -173,6 +185,11 @@ func runGenImg(args []string, globalQuiet bool, subcommandName string) int {
 	//   - handlerFor() resolves the per-family quirk (image_url vs image_urls).
 	//   - Kontext-family models send the first ref as singular image_url;
 	//     most other families send the array as image_urls.
+	// Endpoint resolution:
+	//   - --pick-model set & not cancelled: use the picked endpoint verbatim.
+	//   - Otherwise + refs present: editEndpointFor() routes via the registry.
+	//   - Otherwise (T2I, no picker): handler's T2IEndpointSuffix is applied
+	//     when set (kontext base is i2i; T2I needs "/text-to-image" suffix).
 	endpoint := cfg.Model
 	if pickedEndpoint != "" {
 		endpoint = pickedEndpoint
@@ -194,33 +211,79 @@ func runGenImg(args []string, globalQuiet bool, subcommandName string) int {
 		handler := handlerFor(endpoint)
 		field, value := handler.refPayload(uris, globalQuiet)
 		payload[field] = value
+	} else if pickedEndpoint == "" {
+		// No refs, no picker. If the handler defines a T2I suffix, append it.
+		if suffix := handlerFor(cfg.Model).T2IEndpointSuffix; suffix != "" {
+			endpoint = cfg.Model + suffix
+		}
 	}
 
-	// Inject per-family safety defaults. Pix is for private use, so we default
-	// to safety-off wherever the model exposes a knob -- avoids spurious
-	// rejections on innocuous prompts. The resolution uses the SELECTED
-	// endpoint so that --pick-model invocations get the right family's knob.
-	for k, v := range handlerFor(endpoint).SafetyDefaults {
+	handler := handlerFor(endpoint)
+
+	// Aspect ratio:
+	//   1. --size flag if given (parsed; snapped to nearest supported).
+	//   2. else: first ref's intrinsic aspect ratio (snapped).
+	//   3. else: "1:1" (sensible default for no-ref no-flag T2I).
+	aspectRatio := ""
+	if sizeFlag != "" {
+		ar, err := parseSizeFlag(sizeFlag)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			return 2
+		}
+		aspectRatio = ar
+	} else if len(refs) > 0 {
+		aspectRatio = inferAspectRatioFromRef(refs[0])
+	}
+	if aspectRatio == "" {
+		aspectRatio = "1:1"
+	}
+	handler.applySizing(payload, aspectRatio)
+
+	// num_images: pix writes a single output file; always request one.
+	payload["num_images"] = 1
+
+	// output_format: derived from the user's requested filename extension so
+	// FAL returns the format we want directly (avoiding magick conversion).
+	if of := outputFormatFromPath(outputPath); of != "" {
+		payload["output_format"] = of
+	}
+
+	// Required fields the model can't run without (e.g. ideogram style:AUTO).
+	for k, v := range handler.RequiredFields {
+		payload[k] = v
+	}
+
+	// Safety defaults (private-use bias toward safety-off).
+	for k, v := range handler.SafetyDefaults {
 		payload[k] = v
 	}
 
 	if dryRun {
 		url := fmt.Sprintf("%s/%s", baseURL, endpoint)
 
-		// For dry-run output, replace base64 data with filename references for readability.
-		// Mirrors the live payload's ref-field naming and safety defaults so the
-		// preview reflects what would actually be sent.
+		// For dry-run output, replace base64 data with filename references for
+		// readability. Mirrors the live payload exactly so the preview shows
+		// what would be sent: ref-field, sizing, num_images, output_format,
+		// required fields, safety defaults.
 		displayPayload := map[string]interface{}{"prompt": prompt}
 		if len(refs) > 0 {
 			displayURLs := make([]string, 0, len(refs))
 			for _, ref := range refs {
 				displayURLs = append(displayURLs, fmt.Sprintf("<base64 of %s>", ref))
 			}
-			handler := handlerFor(endpoint)
 			field, value := handler.refPayload(displayURLs, true /*quiet warn on dry-run*/)
 			displayPayload[field] = value
 		}
-		for k, v := range handlerFor(endpoint).SafetyDefaults {
+		handler.applySizing(displayPayload, aspectRatio)
+		displayPayload["num_images"] = 1
+		if of := outputFormatFromPath(outputPath); of != "" {
+			displayPayload["output_format"] = of
+		}
+		for k, v := range handler.RequiredFields {
+			displayPayload[k] = v
+		}
+		for k, v := range handler.SafetyDefaults {
 			displayPayload[k] = v
 		}
 		pretty, err := json.MarshalIndent(displayPayload, "", "  ")
