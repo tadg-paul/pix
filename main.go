@@ -107,6 +107,8 @@ func run() int {
 			printHelptext("generate")
 		case "cost":
 			printHelptext("cost")
+		case "models":
+			printHelptext("models")
 		default:
 			fmt.Fprintf(os.Stderr, "Unknown subcommand: %s\n", subcommand)
 			printUsage()
@@ -142,6 +144,8 @@ func run() int {
 		return runGenImg(subcommandArgs, quiet, subcommand)
 	case "cost":
 		return runCost(subcommandArgs, quiet)
+	case "models":
+		return runModelsList(subcommandArgs, quiet)
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown subcommand: %s\n", subcommand)
 		printUsage()

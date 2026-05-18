@@ -5274,3 +5274,247 @@ func TestT2I_size_flag_invalid_RT18_22(t *testing.T) {
 		t.Errorf("expected error mentioning size, got: %q", stderr)
 	}
 }
+
+// --- pix cost rework + pix models (discovery #18) ---
+
+// startFakeAPIFull serves /v1/models, /v1/models/pricing, /v1/models/pricing/estimate,
+// and a catch-all generation handler. Any handler may be nil (treated as 404).
+func startFakeAPIFull(t *testing.T, generateHandler, pricingHandler, estimateHandler, modelsHandler http.HandlerFunc) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/v1/models/pricing/estimate":
+			if estimateHandler != nil {
+				estimateHandler(w, r)
+			} else {
+				http.NotFound(w, r)
+			}
+		case strings.HasPrefix(r.URL.Path, "/v1/models/pricing"):
+			if pricingHandler != nil {
+				pricingHandler(w, r)
+			} else {
+				http.NotFound(w, r)
+			}
+		case r.URL.Path == "/v1/models":
+			if modelsHandler != nil {
+				modelsHandler(w, r)
+			} else {
+				http.NotFound(w, r)
+			}
+		default:
+			if generateHandler != nil {
+				generateHandler(w, r)
+			} else {
+				http.NotFound(w, r)
+			}
+		}
+	})
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	return server
+}
+
+// modelsListHandler returns a /v1/models handler emitting the given endpoint_ids
+// with the appropriate category for substring resolution tests.
+func modelsListHandler(ids []string, category string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Honour the category query so requesting only one category
+		// returns only its slice -- mirrors real FAL behaviour.
+		want := r.URL.Query().Get("category")
+		body := fakeModelsResponse(ids, category)
+		if want != "" && want != category {
+			body = fakeModelsResponse(nil, category)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(body))
+	}
+}
+
+// RT-18.23: `pix cost xai/grok-imagine-image` uses positional, ignores config.
+func TestCost_positional_used_verbatim_RT18_23(t *testing.T) {
+	bin := buildBinary(t)
+	binPath := setupEnv(t, bin, "test-key", "model: completely-wrong\n")
+
+	var pricingEndpoint string
+	server := startFakeAPIFull(t, nil,
+		func(w http.ResponseWriter, r *http.Request) {
+			pricingEndpoint = r.URL.Query().Get("endpoint_id")
+			fakePricingHandler(0.02, "images").ServeHTTP(w, r)
+		},
+		fakeEstimateHandler(0.04), nil)
+
+	_, stderr, exitCode := runBinary(t, binPath, []string{"cost", "xai/grok-imagine-image"}, "",
+		[]string{"FAL_BASE_URL=" + server.URL})
+
+	if exitCode != 0 {
+		t.Fatalf("expected exit 0, got %d; stderr: %s", exitCode, stderr)
+	}
+	if pricingEndpoint != "xai/grok-imagine-image" {
+		t.Errorf("expected pricing query for positional endpoint, got: %q", pricingEndpoint)
+	}
+	if !strings.Contains(stderr, "xai/grok-imagine-image") {
+		t.Errorf("expected stderr to name the resolved endpoint, got: %q", stderr)
+	}
+}
+
+// RT-18.24: substring in config resolves to a unique match via /v1/models.
+func TestCost_substring_unique_match_RT18_24(t *testing.T) {
+	bin := buildBinary(t)
+	binPath := setupEnv(t, bin, "test-key", "model: grok\n")
+
+	var pricingEndpoint string
+	server := startFakeAPIFull(t, nil,
+		func(w http.ResponseWriter, r *http.Request) {
+			pricingEndpoint = r.URL.Query().Get("endpoint_id")
+			fakePricingHandler(0.02, "images").ServeHTTP(w, r)
+		},
+		fakeEstimateHandler(0.04),
+		modelsListHandler([]string{"fal-ai/flux/dev", "xai/grok-imagine-image"}, "text-to-image"))
+
+	_, stderr, exitCode := runBinary(t, binPath, []string{"cost"}, "",
+		[]string{"FAL_BASE_URL=" + server.URL})
+
+	if exitCode != 0 {
+		t.Fatalf("expected exit 0, got %d; stderr: %s", exitCode, stderr)
+	}
+	if pricingEndpoint != "xai/grok-imagine-image" {
+		t.Errorf("expected substring 'grok' to resolve to xai/grok-imagine-image, got pricing query for: %q", pricingEndpoint)
+	}
+}
+
+// RT-18.25: ambiguous substring + TTY fires the picker; selection used.
+func TestCost_ambiguous_tty_fires_picker_RT18_25(t *testing.T) {
+	bin := buildBinary(t)
+	binDir, _ := fzfStdinLoggerDir(t)
+	binPath := setupEnvWithConfig(t, bin, "FAL_KEY=test\n",
+		"model: kontext\ninteractive:\n  picker: fzf\n")
+
+	var pricingEndpoint string
+	server := startFakeAPIFull(t, nil,
+		func(w http.ResponseWriter, r *http.Request) {
+			pricingEndpoint = r.URL.Query().Get("endpoint_id")
+			fakePricingHandler(0.05, "images").ServeHTTP(w, r)
+		},
+		fakeEstimateHandler(0.10),
+		modelsListHandler([]string{
+			"fal-ai/flux-pro/kontext", "fal-ai/flux-pro/kontext/max", "fal-ai/flux-pro/kontext/max/multi",
+		}, "text-to-image"))
+
+	_, stderr, exitCode := runBinary(t, binPath, []string{"cost"}, "",
+		ttyEnv("FAL_BASE_URL="+server.URL, "PATH="+binDir+":/usr/bin:/bin"))
+
+	if exitCode != 0 {
+		t.Fatalf("expected exit 0 (picker selects first), got %d; stderr: %s", exitCode, stderr)
+	}
+	// fzf stub picks the first line of input (head -n 1).
+	// Our reorderPreselect with empty preselect leaves models in API order;
+	// alphabetical sort in fetchAllImageModels puts "fal-ai/flux-pro/kontext" first.
+	if pricingEndpoint != "fal-ai/flux-pro/kontext" {
+		t.Errorf("expected picker-selected first model used; got pricing query for: %q", pricingEndpoint)
+	}
+}
+
+// RT-18.26: ambiguous + non-TTY errors with the resolver's reason.
+func TestCost_ambiguous_no_tty_errors_RT18_26(t *testing.T) {
+	bin := buildBinary(t)
+	binPath := setupEnv(t, bin, "test-key", "model: kontext\n")
+
+	server := startFakeAPIFull(t, nil,
+		fakePricingHandler(0.02, "images"),
+		fakeEstimateHandler(0.04),
+		modelsListHandler([]string{"fal-ai/flux-pro/kontext", "fal-ai/flux-pro/kontext/max"}, "text-to-image"))
+
+	_, stderr, exitCode := runBinary(t, binPath, []string{"cost"}, "",
+		[]string{"FAL_BASE_URL=" + server.URL})
+
+	if exitCode == 0 {
+		t.Fatalf("expected non-zero exit for ambiguous match in non-TTY; stderr: %s", stderr)
+	}
+	if !strings.Contains(strings.ToLower(stderr), "ambiguous") {
+		t.Errorf("expected 'ambiguous' in stderr, got: %q", stderr)
+	}
+}
+
+// RT-18.27: no-match + non-TTY errors with the resolver's reason.
+func TestCost_no_match_errors_RT18_27(t *testing.T) {
+	bin := buildBinary(t)
+	binPath := setupEnv(t, bin, "test-key", "model: nonexistent-xyzzy\n")
+
+	server := startFakeAPIFull(t, nil,
+		fakePricingHandler(0.02, "images"),
+		fakeEstimateHandler(0.04),
+		modelsListHandler([]string{"fal-ai/flux/dev", "xai/grok-imagine-image"}, "text-to-image"))
+
+	_, stderr, exitCode := runBinary(t, binPath, []string{"cost"}, "",
+		[]string{"FAL_BASE_URL=" + server.URL})
+
+	if exitCode == 0 {
+		t.Fatalf("expected non-zero exit for no-match; stderr: %s", stderr)
+	}
+	if !strings.Contains(strings.ToLower(stderr), "no image model matches") {
+		t.Errorf("expected 'no image model matches' in stderr, got: %q", stderr)
+	}
+}
+
+// RT-18.28: `pix models` prints every endpoint_id, one per line on stdout.
+func TestModelsList_basic_RT18_28(t *testing.T) {
+	bin := buildBinary(t)
+	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
+
+	server := startFakeAPIFull(t, nil, nil, nil,
+		modelsListHandler([]string{"fal-ai/flux/dev", "xai/grok-imagine-image", "fal-ai/seedream"}, "text-to-image"))
+
+	stdout, _, exitCode := runBinary(t, binPath, []string{"models"}, "",
+		[]string{"FAL_BASE_URL=" + server.URL})
+
+	if exitCode != 0 {
+		t.Fatalf("expected exit 0, got %d", exitCode)
+	}
+	for _, expect := range []string{"fal-ai/flux/dev", "xai/grok-imagine-image", "fal-ai/seedream"} {
+		if !strings.Contains(stdout, expect) {
+			t.Errorf("expected %q in stdout, got: %q", expect, stdout)
+		}
+	}
+}
+
+// RT-18.29: `pix models flux` filters by regex (literal substring).
+func TestModelsList_filter_RT18_29(t *testing.T) {
+	bin := buildBinary(t)
+	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
+
+	server := startFakeAPIFull(t, nil, nil, nil,
+		modelsListHandler([]string{"fal-ai/flux/dev", "xai/grok-imagine-image", "fal-ai/flux-2"}, "text-to-image"))
+
+	stdout, _, exitCode := runBinary(t, binPath, []string{"models", "flux"}, "",
+		[]string{"FAL_BASE_URL=" + server.URL})
+
+	if exitCode != 0 {
+		t.Fatalf("expected exit 0, got %d", exitCode)
+	}
+	if !strings.Contains(stdout, "fal-ai/flux/dev") || !strings.Contains(stdout, "fal-ai/flux-2") {
+		t.Errorf("expected flux models in stdout, got: %q", stdout)
+	}
+	if strings.Contains(stdout, "xai/grok-imagine-image") {
+		t.Errorf("filter should exclude grok, but got: %q", stdout)
+	}
+}
+
+// RT-18.30: invalid regex on `pix models` errors.
+func TestModelsList_bad_regex_RT18_30(t *testing.T) {
+	bin := buildBinary(t)
+	binPath := setupEnv(t, bin, "test-key", "model: fal-ai/grok-2-aurora\n")
+
+	server := startFakeAPIFull(t, nil, nil, nil,
+		modelsListHandler([]string{"fal-ai/flux/dev"}, "text-to-image"))
+
+	_, stderr, exitCode := runBinary(t, binPath, []string{"models", "[bad"}, "",
+		[]string{"FAL_BASE_URL=" + server.URL})
+
+	if exitCode == 0 {
+		t.Errorf("expected non-zero exit for bad regex")
+	}
+	if !strings.Contains(strings.ToLower(stderr), "not a valid regex") {
+		t.Errorf("expected 'not a valid regex' in stderr, got: %q", stderr)
+	}
+}

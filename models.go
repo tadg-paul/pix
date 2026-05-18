@@ -202,6 +202,92 @@ func reorderPreselect(models []modelEntry, preselect string) []modelEntry {
 	return models
 }
 
+// fetchAllImageModels fetches both text-to-image and image-to-image catalogues
+// in parallel, dedupes by endpoint_id (text-to-image wins on collision), and
+// returns the merged list sorted by endpoint_id.
+//
+// Used by `pix cost` (substring resolution) and `pix models` (listing). The
+// model picker for gen/edit uses fetchModels() with a single category derived
+// from refs presence.
+func fetchAllImageModels(falKey string) ([]modelEntry, error) {
+	type result struct {
+		models []modelEntry
+		err    error
+	}
+	tti := make(chan result, 1)
+	iti := make(chan result, 1)
+	go func() {
+		ms, e := fetchModels(falKey, "text-to-image")
+		tti <- result{ms, e}
+	}()
+	go func() {
+		ms, e := fetchModels(falKey, "image-to-image")
+		iti <- result{ms, e}
+	}()
+	r1, r2 := <-tti, <-iti
+	if r1.err != nil && r2.err != nil {
+		return nil, fmt.Errorf("fetching /v1/models: text-to-image: %v; image-to-image: %v", r1.err, r2.err)
+	}
+
+	seen := make(map[string]bool, len(r1.models)+len(r2.models))
+	merged := make([]modelEntry, 0, len(r1.models)+len(r2.models))
+	for _, m := range r1.models {
+		if !seen[m.EndpointID] {
+			seen[m.EndpointID] = true
+			merged = append(merged, m)
+		}
+	}
+	for _, m := range r2.models {
+		if !seen[m.EndpointID] {
+			seen[m.EndpointID] = true
+			merged = append(merged, m)
+		}
+	}
+	// Sort alphabetically for predictable output and substring matching order.
+	for i := 1; i < len(merged); i++ {
+		for j := i; j > 0 && merged[j-1].EndpointID > merged[j].EndpointID; j-- {
+			merged[j-1], merged[j] = merged[j], merged[j-1]
+		}
+	}
+	return merged, nil
+}
+
+// resolveModelBySubstring matches a substring/regex against the live FAL model
+// catalogue (both image categories). Returns the matched endpoint_id when
+// exactly one model matches. Empty input or zero/multiple matches return ""
+// along with a descriptive error.
+//
+// Uses Go's regexp.Compile so users who want anchored or alternation matches
+// can write them; bare substrings work too since they compile as literal
+// regex patterns.
+func resolveModelBySubstring(falKey, pattern string) (string, error) {
+	if pattern == "" {
+		return "", fmt.Errorf("no model id or substring provided")
+	}
+	models, err := fetchAllImageModels(falKey)
+	if err != nil {
+		return "", err
+	}
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return "", fmt.Errorf("model substring %q is not a valid regex: %w", pattern, err)
+	}
+	var matches []string
+	for _, m := range models {
+		if re.MatchString(m.EndpointID) {
+			matches = append(matches, m.EndpointID)
+		}
+	}
+	switch len(matches) {
+	case 0:
+		return "", fmt.Errorf("no image model matches %q", pattern)
+	case 1:
+		return matches[0], nil
+	default:
+		return "", fmt.Errorf("ambiguous: %d models match %q (e.g. %s)", len(matches), pattern, matches[0])
+	}
+}
+
 // fetchModels queries FAL's /v1/models endpoint for active models in the given category.
 func fetchModels(falKey, category string) ([]modelEntry, error) {
 	params := url.Values{}

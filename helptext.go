@@ -9,7 +9,7 @@ import (
 	"os"
 )
 
-//go:embed docs/helptext/pix.md docs/helptext/generate.md docs/helptext/cost.md
+//go:embed docs/helptext/pix.md docs/helptext/generate.md docs/helptext/cost.md docs/helptext/models.md
 var helptextFS embed.FS
 
 // printHelptext writes the named help-text file to stderr. The name is the

@@ -109,7 +109,9 @@ func generateImageWithPayload(client *http.Client, baseURL, endpoint string, pay
 	return imageData, contentType, nil
 }
 
-// fetchUnitPrice queries the FAL unit pricing endpoint.
+// fetchUnitPrice queries the FAL unit pricing endpoint. On HTTP error,
+// surfaces the parsed-envelope error message so the caller can see WHY the
+// pricing request was rejected (rather than just "HTTP 400").
 func fetchUnitPrice(client *http.Client, pricingBase, model, falKey string) (float64, string, error) {
 	url := fmt.Sprintf("%s/v1/models/pricing?endpoint_id=%s", pricingBase, model)
 	req, err := http.NewRequest("GET", url, nil)
@@ -125,7 +127,8 @@ func fetchUnitPrice(client *http.Client, pricingBase, model, falKey string) (flo
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return 0, "", fmt.Errorf("HTTP %d", resp.StatusCode)
+		body, _ := io.ReadAll(resp.Body)
+		return 0, "", fmt.Errorf("HTTP %d: %s", resp.StatusCode, formatFALErrorBody(body))
 	}
 
 	body, err := io.ReadAll(resp.Body)

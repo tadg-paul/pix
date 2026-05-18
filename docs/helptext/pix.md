@@ -6,7 +6,8 @@ Subcommands:
   generate   Generate an image from a text prompt (stdin)
              Accepts optional reference images as earlier positionals (max 3).
              Alias: gen
-  cost       Query pricing for the configured model
+  cost       Query pricing for a model (configured, picked, or named)
+  models     List FAL image-model endpoint_ids (pipeable)
 
 Global flags:
   -h, --help       Show this help message
